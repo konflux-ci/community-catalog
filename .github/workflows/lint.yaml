@@ -1,0 +1,66 @@
+---
+name: Linters
+on:  # yamllint disable-line rule:truthy
+  pull_request:
+    types: ['opened', 'reopened', 'synchronize']
+  workflow_dispatch:
+jobs:
+  yamllint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run yamllint
+        uses: frenck/action-yamllint@v1
+  tknparse:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout files
+        uses: actions/checkout@v4
+      - name: install tkn
+        uses: ./.github/actions/install-tkn
+      - name: Get changed files
+        uses: tj-actions/changed-files@v41
+        id: changed-files
+        with:
+          files: |
+            **/*.yaml
+      - name: Run tkn util
+        run: .github/scripts/tkn_check_parse.sh
+        env:
+          CHANGED_FILES: ${{ steps.changed-files.outputs.all_changed_files }}
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_REFNAME: ${{ github.ref_name }}
+  gitlint:
+    name: Run gitlint checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Install gitlint into container
+        run: |
+          python3 -m venv venv
+          source venv/bin/activate
+          python3 -m pip install gitlint
+      - name: Run gitlint check
+        run: |
+          source venv/bin/activate
+          gitlint --commits origin/${{ github.event.pull_request.base.ref }}..HEAD
+  checkton:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+      # Differential Checkton requires full git history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Run Checkton
+        id: checkton
+        uses: chmeliik/checkton@v0.2.2
+        # Migrating to the konflux-ci org
+        with:
+          fail-on-findings: true
+          find-copies: false
+          find-renames: false
