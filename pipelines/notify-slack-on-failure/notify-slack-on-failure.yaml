@@ -1,0 +1,47 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: notify-slack-on-failure
+  labels:
+    app.kubernetes.io/version: "0.1"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: Sends an error message to Slack using postMessage API if managed pipelines fail
+  params:
+    - name: secretName
+      type: string
+      description: Name of secret which contains authentication token for app
+    - name: secretKeyName
+      type: string
+      description: Name of key within secret which contains webhook URL
+    - name: release
+      type: string
+      description: Namespaced name of release - should be in format "namespace/name"
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+  tasks:
+    - name: notify-slack-on-failure
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/notify-slack-on-failure/notify-slack-on-failure.yaml
+      params:
+        - name: secretName
+          value: $(params.secretName)
+        - name: secretKeyName
+          value: $(params.secretKeyName)
+        - name: release
+          value: $(params.release)
