@@ -1,0 +1,22 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-notify-slack-on-failure-key-not-found
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Run the notify-slack-on-failure task and verify that the task exits 
+    with an error when wrong secretKeyName is provided
+  tasks:
+    - name: run-task
+      taskRef:
+        name: notify-slack-on-failure
+      params:
+        - name: secretName
+          value: "my-secret"
+        - name: secretKeyName
+          value: "missing-key"
+        - name: release
+          value: "ns/success"
