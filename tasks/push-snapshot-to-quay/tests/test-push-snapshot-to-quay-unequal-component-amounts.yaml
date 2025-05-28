@@ -1,0 +1,19 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-quay-unequal-component-amounts
+spec:
+  description: |
+    Run the push-snapshot-to-quay task and check that the task 
+    succeeds with a different number of components in the 
+    release plan and snapshot
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-quay
+      params:
+        - name: releasePlan
+          value: "ns/releasePlan"
+        - name: snapshot
+          value: "ns/multiple"

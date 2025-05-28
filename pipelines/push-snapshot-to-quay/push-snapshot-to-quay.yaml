@@ -1,0 +1,44 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: push-snapshot-to-quay
+  labels:
+    app.kubernetes.io/version: "0.1.0"
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+spec:
+  description: >-
+    Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
+    each image is taken from the '.spec.data.mapping' section of the release plan, in the form
+    '.spec.data.mapping.components.repository', and '.spec.data.mapping.components.tags'.
+  params:
+    - name: releasePlan
+      description: Namespaced name of release plan - should be in format "namespace/name"
+      type: string
+    - name: snapshot
+      description: Namespaced name of snapshot - should be in format "namespace/name"
+      type: string
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+  tasks:
+    - name: push-snapshot-to-quay
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/push-snapshot-to-quay/push-snapshot-to-quay.yaml
+      params:
+        - name: snapshot
+          value: $(params.snapshot)
+        - name: releasePlan
+          value: $(params.releasePlan)

@@ -1,0 +1,102 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: push-snapshot-to-quay
+  labels:
+    app.kubernetes.io/version: "0.1.0"
+spec:
+  description: >-
+    Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
+    each image is taken from the '.spec.data.mapping' section of the release plan, in the form
+    '.spec.data.mapping.components.repository', and '.spec.data.mapping.components.tags'.
+  params:
+    - name: releasePlan
+      description: Namespaced name of release plan - should be in format "namespace/name"
+      type: string
+    - name: snapshot
+      description: Namespaced name of snapshot - should be in format "namespace/name"
+      type: string
+  steps:
+    - name: push-snapshot-to-quay
+      image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+
+        push_image() { # Expected arguments are [name, containerImage, repository, tag]
+          # this task is intended to be used for quay.io
+          REGISTRY=quay.io
+
+          SOURCE_AUTH_FILE=$(mktemp)
+          SOURCE_REPO=${2%%@sha256:*}
+          select-oci-auth "$2" | jq -c \
+            '.auths."'"$SOURCE_REPO"'" = .auths."'"$REGISTRY"'" | del(.auths."'"$REGISTRY"'")' > "$SOURCE_AUTH_FILE"
+
+          DEST_AUTH_FILE=$(mktemp)
+          # the auth key will be modified to the full repository path, so that
+          # we can create a combined auth file with source and destination entries for `cosign copy` later
+          select-oci-auth "$3" | jq -c \
+            '.auths."'"$3"'" = .auths."'"$REGISTRY"'" | del(.auths."'"$REGISTRY"'")' > "$DEST_AUTH_FILE"
+
+          DESTINATION_DIGEST=$(oras resolve --registry-config "$DEST_AUTH_FILE" "$3:$4" || true)
+          ORIGIN_DIGEST=$(oras resolve --registry-config "$SOURCE_AUTH_FILE" "$2")
+
+          if [[ "$DESTINATION_DIGEST" != "$ORIGIN_DIGEST" || -z "$DESTINATION_DIGEST" ]]; then
+            # Create a combined auth file to enable partial oci matches to work
+            DOCKER_CONFIG="$(mktemp -d)"
+            export DOCKER_CONFIG
+
+            # SC2128 - "Expanding an array without an index only gives the element in the index 0."
+            # is disabled because "$item" on the next line should only have one element, so there 
+            # is no need to get any index other than 0.
+
+            # shellcheck disable=SC2128
+            jq -s 'reduce .[] as $item ({}; . * $item)' \
+              "$SOURCE_AUTH_FILE" "$DEST_AUTH_FILE" > "$DOCKER_CONFIG"/config.json
+
+            cosign copy -f "$2" "$3:$4"
+
+            echo "Pushed image $2 to repository $3:$4"
+          else
+            echo "Component push skipped (source digest exists at destination): $1 $2"
+          fi
+
+        }
+
+        IFS='/' read -r "SNAPSHOT_NAMESPACE" "SNAPSHOT_NAME" <<< "$(params.snapshot)"
+        SNAPSHOT_SPEC=$(kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE" \
+          -o jsonpath='{.spec}')
+
+        IFS='/' read -r "RP_NAMESPACE" "RP_NAME" <<< "$(params.releasePlan)"
+        RP_DATA=$(kubectl get releaseplan "$RP_NAME" -n "$RP_NAMESPACE" \
+          -o jsonpath='{.spec.data.mapping}')
+
+        NUM_COMPONENTS=$(jq '.components | length' <<< "$SNAPSHOT_SPEC")
+
+        if [[ $NUM_COMPONENTS == 0 ]]; then
+          echo "No components in snapshot. There needs to be at least one component" \
+            "in the snapshot for this task to run."
+          exit 1
+        fi
+
+        for ((i = 0; i < NUM_COMPONENTS; i++)); do
+
+          COMPONENT=$(echo -n "$SNAPSHOT_SPEC" | jq -c --argjson i "$i" '.components[$i]')
+          COMPONENT_DESTINATION=$(echo -n "$RP_DATA" | jq -c --argjson i "$i" '.components[$i]')
+          
+          if [[ "$COMPONENT_DESTINATION" == "null" ]]; then
+            echo "No mappings left in release plan for components - Skipping remaining components."
+            break
+          fi
+
+          NAME=$(jq -r '.name' <<< "$COMPONENT")
+          CONTAINER_IMAGE=$(jq -r '.containerImage' <<< "$COMPONENT")
+          REPOSITORY=$(jq -r '.repository' <<< "$COMPONENT_DESTINATION")
+          IMAGE_TAGS=$(jq -r '.tags' <<< "$COMPONENT_DESTINATION")
+
+          for TAG in $(jq -r '.[]' <<< "$IMAGE_TAGS"); do
+            push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$TAG"
+          done
+
+        done
