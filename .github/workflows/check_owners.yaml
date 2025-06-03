@@ -1,0 +1,34 @@
+---
+name: Check owners
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+jobs:
+  run-tekton-task-tests:
+    name: Check owners
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Get changed dirs
+        id: changed-dirs
+        uses: tj-actions/changed-files@ed68ef82c095e0d48ec87eccea555d944a631a4c  # v45.0.6
+        with:
+          files: |
+            tasks/**
+            pipelines/**
+          dir_names: "true"
+          dir_names_max_depth: "2"
+      - name: Show changed dirs
+        run: |
+          echo ${{ steps.changed-dirs.outputs.all_changed_files }}
+      - name: Check owners
+        if: |
+          steps.changed-dirs.outputs.any_changed == 'true'
+        run: .github/scripts/check_owners.sh
+        env:
+          DIRECTORIES: >-
+            ${{ steps.changed-dirs.outputs.all_changed_files }}
