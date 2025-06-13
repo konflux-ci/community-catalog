@@ -16,3 +16,7 @@ spec:
           value: "ns/skip-image"
         - name: snapshot
           value: "ns/skip-image"
+        - name: release
+          value: "ns/skip-image-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"

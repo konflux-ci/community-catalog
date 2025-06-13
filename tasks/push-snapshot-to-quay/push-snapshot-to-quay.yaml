@@ -4,20 +4,57 @@ kind: Task
 metadata:
   name: push-snapshot-to-quay
   labels:
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "0.2.0"
 spec:
   description: >-
     Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
     each image is taken from the '.spec.data.mapping' section of the release plan, in the form
     '.spec.data.mapping.components.repository', and '.spec.data.mapping.components.tags'.
+    
+    If `requireSuccessfulManagedRelease` is "true", the snapshot will only be pushed if it
+    contains a status indicating that a managed pipeline has successfully completed.
   params:
+    - name: release
+      description: Namespaced name of release - should be in format "namespace/name"
+      type: string
     - name: releasePlan
       description: Namespaced name of release plan - should be in format "namespace/name"
+      type: string
+    - name: requireSuccessfulManagedRelease
+      description: Only push if the managed release status is successful
       type: string
     - name: snapshot
       description: Namespaced name of snapshot - should be in format "namespace/name"
       type: string
   steps:
+    - name: check-release-status
+      image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+
+        # Only check release status if it will be used to determine push
+        if [[ "$(params.requireSuccessfulManagedRelease)" != "true" ]]; then
+          echo "No release validation required, skipping check-release-status step."
+          exit 0
+        fi
+
+        # check for release status and check if a managed pipeline failed
+        IFS='/' read -r RELEASE_NAMESPACE RELEASE_NAME <<< "$(params.release)"
+        RELEASECONDITIONS=$(kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" \
+          -o jsonpath='{.status.conditions}')
+        if [ -z "$RELEASECONDITIONS" ]; then
+          echo "No release conditions found for $RELEASE_NAME in namespace $RELEASE_NAMESPACE"
+          exit 1
+        fi
+        RELEASECONDITION=$(echo "$RELEASECONDITIONS" | jq '.[] | select(.type == "ManagedPipelineProcessed")')
+        RELEASESTATUS=$(jq -r '.reason' <<< "$RELEASECONDITION")
+        echo "Release status: $RELEASESTATUS"
+
+        if [[ "$RELEASESTATUS" != *"Succeeded"* ]]; then
+          echo "Release did not succeed, stopping snapshot push"
+          exit 1
+        fi
     - name: push-snapshot-to-quay
       image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
       script: |

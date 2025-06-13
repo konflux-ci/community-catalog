@@ -18,3 +18,7 @@ spec:
           value: "ns/releasePlan"
         - name: snapshot
           value: "ns/nopermission"
+        - name: release
+          value: "ns/nopermission-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"
