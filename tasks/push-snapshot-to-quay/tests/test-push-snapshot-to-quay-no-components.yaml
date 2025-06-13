@@ -18,3 +18,7 @@ spec:
           value: "ns/releasePlan"
         - name: snapshot
           value: "ns/empty"
+        - name: release
+          value: "ns/empty-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"

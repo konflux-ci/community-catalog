@@ -4,7 +4,7 @@ kind: Pipeline
 metadata:
   name: push-snapshot-to-quay
   labels:
-    app.kubernetes.io/version: "0.1.0"
+    app.kubernetes.io/version: "0.2.0"
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
 spec:
@@ -12,6 +12,9 @@ spec:
     Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
     each image is taken from the '.spec.data.mapping' section of the release plan, in the form
     '.spec.data.mapping.components.repository', and '.spec.data.mapping.components.tags'.
+    
+    If `requireSuccessfulManagedRelease` is "true", the snapshot will only be pushed if it
+    contains a status indicating that a managed pipeline has successfully completed.
   params:
     - name: releasePlan
       description: Namespaced name of release plan - should be in format "namespace/name"
@@ -26,6 +29,13 @@ spec:
     - name: taskGitRevision
       type: string
       description: The revision in the taskGitUrl repo to be used
+    - name: release
+      description: Namespaced name of release - should be in format "namespace/name"
+      type: string
+    - name: requireSuccessfulManagedRelease
+      description: Only push if the managed release status is successful
+      type: string
+      default: "false"
   tasks:
     - name: push-snapshot-to-quay
       taskRef:
@@ -42,3 +52,7 @@ spec:
           value: $(params.snapshot)
         - name: releasePlan
           value: $(params.releasePlan)
+        - name: release
+          value: $(params.release)
+        - name: requireSuccessfulManagedRelease
+          value: $(params.requireSuccessfulManagedRelease)

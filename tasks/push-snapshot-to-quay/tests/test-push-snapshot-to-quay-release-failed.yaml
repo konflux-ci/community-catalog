@@ -2,10 +2,12 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-push-snapshot-to-quay-success
+  name: test-push-snapshot-to-quay-release-failed
+  annotations:
+    test/assert-task-failure: "run-task"
 spec:
   description: |
-    Run the push-snapshot-to-quay task and check that the task succeeds
+    Run the push-snapshot-to-quay task with a release param that refers to a failed release. The task should fail.
   tasks:
     - name: run-task
       taskRef:
@@ -16,6 +18,6 @@ spec:
         - name: snapshot
           value: "ns/snapshot"
         - name: release
-          value: "ns/snapshot-release"
+          value: "ns/fail"
         - name: requireSuccessfulManagedRelease
-          value: "false"
+          value: "true"

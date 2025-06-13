@@ -16,3 +16,7 @@ spec:
           value: "ns/multiple"
         - name: snapshot
           value: "ns/multiple"
+        - name: release
+          value: "ns/multiple-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"

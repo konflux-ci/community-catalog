@@ -155,6 +155,80 @@ EOF
     else
       cat /tmp/mock-releaseplan.json
     fi
+  elif [[ "$*" == *"release "* ]]
+  then
+    # Simulate release status for release lookups
+    RELEASE_NAMESPACE="$2"
+    RELEASE_NAME="$3"
+    if [[ "$3" == "fail" ]]; then
+      cat > /tmp/mock-release.json <<EOF
+      {
+        "apiVersion": "appstudio.redhat.com/v1alpha1",
+        "kind": "Release",
+        "metadata": {
+          "name": "fail",
+          "namespace": "$2"
+        },
+        "status": {
+          "conditions": [
+            {
+              "message": "Simulated failure message",
+              "reason": "Failed",
+              "status": "False",
+              "type": "ManagedPipelineProcessed"
+            }
+          ]
+        }
+      }
+EOF
+    elif [[ "$3" == "success" ]]; then
+      cat > /tmp/mock-release.json <<EOF
+      {
+        "apiVersion": "appstudio.redhat.com/v1alpha1",
+        "kind": "Release",
+        "metadata": {
+          "name": "success",
+          "namespace": "$2"
+        },
+        "status": {
+          "conditions": [
+            {
+              "message": "",
+              "reason": "Succeeded",
+              "status": "True",
+              "type": "ManagedPipelineProcessed"
+            }
+          ]
+        }
+      }
+EOF
+    else
+      cat > /tmp/mock-release.json <<EOF
+      {
+        "apiVersion": "appstudio.redhat.com/v1alpha1",
+        "kind": "Release",
+        "metadata": {
+          "name": "$3",
+          "namespace": "$2"
+        },
+        "status": {
+          "conditions": [
+            {
+              "message": "",
+              "reason": "Succeeded",
+              "status": "True",
+              "type": "ManagedPipelineProcessed"
+            }
+          ]
+        }
+      }
+EOF
+    fi
+    if [[ "$*" == *"jsonpath={.status.conditions}"* ]]; then
+      cat /tmp/mock-release.json | jq '.status.conditions'
+    else
+      cat /tmp/mock-release.json
+    fi
   fi
 
 }

@@ -17,3 +17,7 @@ spec:
           value: "ns/releasePlan"
         - name: snapshot
           value: "ns/multiple"
+        - name: release
+          value: "ns/unequal-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"
