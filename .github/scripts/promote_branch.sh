@@ -1,0 +1,163 @@
+#!/usr/bin/env bash
+
+# This script promotes branches in the community-catalog repository.
+#
+# The script promotes the development content into the staging branch, or the staging
+# content into the production branch. It starts by performing the following checks, then
+# it performs a git force push. There is no pull request.
+#
+# Checks:
+#   - If there is content in the staging branch that is not yet in the production branch, the
+#     script will not git push to add more content to the staging branch. This can be overridden with
+#     --force-to-staging true
+#   - If promoting to production and the content has not been in the staging branch for at least 7 days,
+#     the script will exit without doing a push. Content is expected to sit in staging for at least six days
+#     to provide sufficient testing time. This can be overridden with --override true
+#
+# Prerequisities:
+#   - curl, git and jq installed.
+
+set -e
+
+# GitHub repository details
+ORG="konflux-ci"
+REPO="community-catalog"
+
+OPTIONS=$(getopt --long "promotion-type:,force-to-staging:,override:,dry-run:,help" -o "p:,h" -- "$@")
+eval set -- "$OPTIONS"
+while true; do
+    case "$1" in
+        -p|--promotion-type)
+            PROMOTION_TYPE="$2"
+            shift 2
+            ;;
+        --force-to-staging)
+            FORCE_TO_STAGING="$2"
+            shift 2
+            ;;
+        --override)
+            OVERRIDE="$2"
+            shift 2
+            ;;
+        --dry-run)
+            DRY_RUN="$2"
+            shift 2
+            ;;
+        -h|--help)
+            print_help
+            exit
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *) echo "Error: Unexpected option: $1" >&2
+    esac
+done
+
+cleanup() {
+  if [ -d "${1}" ]; then
+    echo "Deleting tmpDir..."
+    cd -
+    rm -rf "${1:?}"
+  fi
+}
+
+print_help() {
+    echo "Usage: $0 --promotion-type branch1-to-branch2 [--force-to-staging false] [--override false] [--dry-run false]"
+    echo
+    echo "  --promotion-type:   The type of promotion to perform. Either development-to-staging"
+    echo "                      or staging-to-production."
+    echo "  --force-to-staging: If passed with value true, allow promotion to staging even"
+    echo "                      if staging and production differ."
+    echo "  --override:         If passed with value true, allow promotion to production"
+    echo "                      even if the change has not been in staging for six days."
+    echo "  --dry-run:          If passed with value true, print out the changes that would"
+    echo "                      be promoted but do not git push or delete the temp repo."
+    echo
+    echo "  --promotion-type has to be specified."
+}
+
+check_if_branch_differs() {
+    ACTUAL_DIFFERENT_LINES=$(git diff --numstat "origin/$1" | wc -l)
+    if [ "$ACTUAL_DIFFERENT_LINES" -ne 0 ] ; then
+        echo "Lines differ in branch $1"
+        echo "Actual differing lines: $(git diff --numstat origin/"$1")"
+        exit 1
+    fi
+}
+
+check_if_any_commits_in_last_six_days() {
+    NEW_COMMITS=$(git log --oneline --since="$(date --date="6 days ago" +%Y-%m-%d)" | wc -l)
+    if [ "$NEW_COMMITS" -ne 0 ] ; then
+        echo "There are commits in staging that are less than six days old. Blocking promotion to production"
+        echo "Commits less than six days old: $(git log --oneline --since="$(date --date="6 days ago" +%Y-%m-%d)")"
+        exit 1
+    fi
+}
+
+if [ -z "${PROMOTION_TYPE}" ]; then
+    echo -e "Error: missing '--promotion-type' argument\n"
+    print_help
+    exit 1
+fi
+if [ "${PROMOTION_TYPE}" == development-to-staging ]; then
+    SOURCE_BRANCH=development
+    TARGET_BRANCH=staging
+elif [ "${PROMOTION_TYPE}" == staging-to-production ]; then
+    SOURCE_BRANCH=staging
+    TARGET_BRANCH=production
+else
+    echo "Invalid promotion type. Only 'development-to-staging' and 'staging-to-production' are allowed"
+    print_help
+    exit 1
+fi
+if [ -z "${GITHUB_TOKEN}" ]; then
+    echo -e "Error: missing 'GITHUB_TOKEN' environment variable\n"
+    print_help
+    exit 1
+fi
+
+# Personal access token with appropriate permissions
+token="${GITHUB_TOKEN}"
+
+# Clone the repository
+tmpDir=$(mktemp -d)
+trap 'cleanup ${tmpDir}' EXIT
+communityCatalogDir="${tmpDir}/community-catalog"
+mkdir -p "${communityCatalogDir}"
+
+echo -e "---\nPromoting community-catalog ${SOURCE_BRANCH} to ${TARGET_BRANCH}\n---\n"
+
+git clone "https://oauth2:$GITHUB_TOKEN@github.com/$ORG/$REPO.git" "${communityCatalogDir}"
+cd "${communityCatalogDir}"
+
+# A change cannot go into production if the changes in staging are less than six days old
+if [[ "${TARGET_BRANCH}" == "production" && "${OVERRIDE}" != "true" ]] ; then
+    git checkout origin/staging
+    check_if_any_commits_in_last_six_days
+fi
+
+# A change cannot go into staging if staging and production differ
+if [[ "${TARGET_BRANCH}" == "staging" && "${FORCE_TO_STAGING}" != "true" ]] ; then
+    git checkout origin/staging
+    check_if_branch_differs production
+fi
+
+echo "Included PRs:"
+mapfile -t COMMITS < <(git rev-list --first-parent --ancestry-path origin/"$TARGET_BRANCH"'...'origin/"$SOURCE_BRANCH")
+## now loop through the above array
+for COMMIT in "${COMMITS[@]}"
+do
+  curl -s   -H 'Authorization: token  '"$token"  'https://api.github.com/search/issues?q=sha:'"$COMMIT" | jq -r '.items[]
+    | select(.repository_url=="https://api.github.com/repos/'"$ORG"'/'"$REPO"'")
+    | .pull_request | select(.merged_at!=null) | .html_url'
+  git show --oneline --no-patch "$COMMIT"
+done
+
+if [ "${DRY_RUN}" == "true" ] ; then
+    exit
+fi
+
+git checkout $SOURCE_BRANCH
+git push origin $SOURCE_BRANCH:$TARGET_BRANCH
