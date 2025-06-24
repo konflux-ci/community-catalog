@@ -26,15 +26,15 @@ spec:
 
         IFS='/' read -r RELEASE_NAMESPACE RELEASE_NAME <<< "$(params.release)"
 
-        GIT_SHA=$(kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" \
-          -o jsonpath='{.metadata.labels.pac\.test\.appstudio\.openshift\.io/sha}')
+        RELEASE=$(kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" -o json)
+
+        GIT_SHA=$(jq -r '.metadata.labels."pac.test.appstudio.openshift.io/sha"' <<< "$RELEASE")
         if [ -z "$GIT_SHA" ] ; then
             echo "Error: git sha label from PaC not found in Release labels"
             exit 1
         fi
 
-        IMAGES=$(kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" \
-          -o jsonpath='{.status.artifacts.images}')
+        IMAGES=$(jq -c '.status.artifacts.images' <<< "$RELEASE")
         if [ -z "$IMAGES" ] ; then
             echo "Error: no images found in Release Status Artifacts"
             exit 1
