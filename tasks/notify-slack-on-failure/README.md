@@ -1,6 +1,6 @@
 # notify-slack-on-failure
 
-Tekton task that sends an error message to Slack using postMessage API if managed pipelines fail.
+Tekton task that sends an error message to Slack using postMessage API if managed pipelines fail. test change here
 
 ## Parameters
 
