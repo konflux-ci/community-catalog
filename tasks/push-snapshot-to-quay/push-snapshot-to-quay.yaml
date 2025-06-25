@@ -3,8 +3,6 @@ apiVersion: tekton.dev/v1
 kind: Task
 metadata:
   name: push-snapshot-to-quay
-  labels:
-    app.kubernetes.io/version: "0.2.0"
 spec:
   description: >-
     Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
