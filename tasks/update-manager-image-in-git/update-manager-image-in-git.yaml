@@ -7,7 +7,7 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: "release, tenant"
 spec:
-  description: |
+  description: |-
       Updates the image line in the manager yaml files in the internal-services/manager directory.
       If mode is `pr`, a pull request is created for the update. If mode is `push`, the change is pushed
       directly.

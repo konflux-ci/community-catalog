@@ -7,7 +7,8 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
-  description: Sends an error message to Slack using postMessage API if managed pipelines fail
+  description: |-
+    Sends an error message to Slack using postMessage API if managed pipelines fail
   params:
     - name: secretName
       type: string

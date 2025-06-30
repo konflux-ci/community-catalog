@@ -13,6 +13,6 @@ done via the `imageRef` task result.
 
 ## Parameters
 
-| Name    | Description                    | Optional | Default value |
-|---------|--------------------------------|----------|---------------|
-| release | Namespaced name of the Release | No       | -             |
+| Name    | Description                        | Optional | Default value |
+|---------|------------------------------------|----------|---------------|
+| release | The namespaced name of the Release | No       | -             |

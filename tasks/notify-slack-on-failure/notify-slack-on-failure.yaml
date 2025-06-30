@@ -4,7 +4,7 @@ kind: Task
 metadata:
   name: notify-slack-on-failure
 spec:
-  description: >-
+  description: |-
     Sends an error message to Slack using postMessage API if managed pipelines fail
   params:
     - name: secretName

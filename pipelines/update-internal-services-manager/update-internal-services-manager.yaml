@@ -7,7 +7,7 @@ metadata:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: "release, tenant"
 spec:
-  description: >-
+  description: |-
     Tekton pipeline to update the internal-services manager yaml to the latest image in the
     hacbs-release/app-interface-deployments repository.
   params:
