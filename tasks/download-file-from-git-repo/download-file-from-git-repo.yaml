@@ -1,0 +1,84 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: download-file-from-git-repo
+spec:
+  description: Fetches a single file from a Git repository via its raw HTTP endpoint.
+  params:
+    - name: url
+      description: The base URL of the Git repository (e.g., https://github.com/org/repo).
+    - name: revision
+      description: The Git revision (branch, tag, or commit SHA).
+    - name: pathInRepo
+      description: The path to the file within the repository.
+    - name: REPO_TOKEN
+      description: The name of the Kubernetes Secret that contains an access token for a private Git repository.
+      type: string
+      default: ""
+    - name: REPO_KEY
+      description: The key within the REPO_TOKEN secret that holds the access token.
+      type: string
+      default: ""
+  results:
+    - name: content
+      description: The content of the downloaded file.
+  steps:
+    - name: fetch
+      image: quay.io/konflux-ci/konflux-test:v1.4.26
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        
+        # Sanitize inputs to remove any potential leading/trailing whitespace, including newlines.
+        CLEAN_URL=$(echo "$(params.url)" | xargs)
+        CLEAN_REVISION=$(echo "$(params.revision)" | xargs)
+        CLEAN_PATH=$(echo "$(params.pathInRepo)" | xargs)
+
+        file_url="${CLEAN_URL}/raw/${CLEAN_REVISION}/${CLEAN_PATH}"
+        echo "Attempting to fetch file from URL: ${file_url}"
+        
+        CURL_OUTPUT=$(mktemp)
+        CURL_ARGS=(-w "%{http_code}" -L -o "$CURL_OUTPUT")
+        
+        if [[ -n "$(params.REPO_TOKEN)" ]]; then
+          echo "Source repository is private, using token from secret '$(params.REPO_TOKEN)'."
+          TOKEN=$(kubectl get secret "$(params.REPO_TOKEN)" -o jsonpath="{.data.$(params.REPO_KEY)}" | base64 -d)
+          if [[ -z "$TOKEN" ]]; then
+            echo "ERROR: Failed to retrieve or decode token from secret '$(params.REPO_TOKEN)' with key '$(params.REPO_KEY)'."
+            exit 1
+          fi
+          
+          if [[ "$CLEAN_URL" == *"github.com"* ]]; then
+            AUTH_HEADER="Authorization: token $TOKEN"
+          elif [[ "$CLEAN_URL" == *"gitlab."* ]]; then
+            AUTH_HEADER="PRIVATE-TOKEN: $TOKEN"
+          else
+            echo "ERROR: Unknown Git provider for URL ${CLEAN_URL}."
+            exit 1
+          fi
+          CURL_ARGS+=(-H "$AUTH_HEADER")
+        else
+          echo "Source repository is public."
+        fi
+
+        HTTP_STATUS=$(curl "${CURL_ARGS[@]}" "$file_url")
+        
+        if [[ "$HTTP_STATUS" -ne 200 ]]; then
+            echo "ERROR: Failed to fetch file. curl responded with HTTP status: ${HTTP_STATUS}"
+            echo "URL: ${file_url}"
+            echo "--- Response Body ---"
+            cat "$CURL_OUTPUT" || echo "(No response body from curl)"
+            echo "---------------------"
+            exit 1
+        fi
+        
+        file_content=$(cat "$CURL_OUTPUT")
+        
+        if [[ -z "$file_content" ]]; then
+            echo "ERROR: Fetched file is empty, but request was successful (HTTP 200)."
+            echo "URL: ${file_url}"
+            exit 1
+        fi
+        
+        echo "Successfully fetched file content."
+        echo -n "$file_content" > "$(results.content.path)"

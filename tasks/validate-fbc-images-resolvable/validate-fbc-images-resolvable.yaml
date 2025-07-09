@@ -1,0 +1,150 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: validate-fbc-images-resolvable
+spec:
+  description: >-
+    This task validates a File-Based Catalog (FBC) image by checking for the
+    availability of all its related images. It uses an ImageDigestMirrorSet
+    (IDMS) to check for mirrors if a primary image URL is unavailable.
+    Includes a configurable retry mechanism.
+  params:
+    - name: fbc-image
+      description: The FBC image pull spec to be validated.
+    - name: idms-content
+      description: The string content of the ImageDigestMirrorSet YAML file.
+    - name: retries
+      description: The maximum number of validation attempts.
+      type: string
+      default: "3"
+    - name: retry-interval
+      description: The time to wait between retries, in seconds.
+      type: string
+      default: "300" # 5 minutes
+  steps:
+    - name: validate
+      image: registry.access.redhat.com/ubi9/ubi:latest
+      env:
+        - name: FBC_IMAGE
+          value: "$(params.fbc-image)"
+        - name: IDMS_CONTENT
+          value: "$(params.idms-content)"
+        - name: RETRIES
+          value: "$(params.retries)"
+        - name: RETRY_INTERVAL
+          value: "$(params.retry-interval)"
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        echo "--- Installing Dependencies ---"
+        # Install skopeo and jq from dnf
+        dnf install -y skopeo jq
+        
+        # Install yq manually as it's not in the default UBI repos
+        YQ_VERSION="v4.45.4"
+        ARCH=$(uname -m)
+        if [ "$ARCH" == "x86_64" ]; then
+            ARCH="amd64"
+        fi
+        curl -L "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${ARCH}" -o /usr/local/bin/yq
+        chmod +x /usr/local/bin/yq
+
+        # Install opm
+        OPM_VERSION="v1.52.0"
+        curl -L "https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/linux-${ARCH}-opm" -o /usr/local/bin/opm
+        chmod +x /usr/local/bin/opm
+        
+        echo "--- Versions ---"
+        opm version
+        yq --version
+        echo "----------------"
+        
+        if [[ -z "$FBC_IMAGE" || "$FBC_IMAGE" == "null" ]]; then
+            echo "ERROR: FBC_IMAGE is not set."
+            exit 1
+        fi
+
+        attempt=0
+        while [ $attempt -lt $RETRIES ]; do
+          attempt=$((attempt+1))
+          echo "--- Validation Attempt ${attempt} of ${RETRIES} ---"
+          
+          echo "Validating FBC: $FBC_IMAGE"
+          echo "================================================="
+          
+          related_images=$(opm render "${FBC_IMAGE}" --skip-tls-verify | jq -r 'select(.schema == "olm.bundle") | .relatedImages[].image' | sort -u)
+          
+          if [[ -z "$related_images" ]]; then
+              echo "ERROR: No related images found in the FBC."
+              exit 1
+          fi
+          
+          validation_failed=false
+          
+          # Load the mirror set into shell arrays for robust processing.
+          # The yq query now includes `.spec` to correctly parse the IDMS.
+          mapfile -t sources < <(echo "$IDMS_CONTENT" | yq e '.spec.imageDigestMirrors[].source' -)
+          mapfile -t mirrors < <(echo "$IDMS_CONTENT" | yq e '.spec.imageDigestMirrors[].mirrors[0]' -)
+
+          for image in $related_images; do
+              echo "Checking image: $image"
+              if skopeo inspect "docker://${image}" --tls-verify=false >/dev/null 2>&1; then
+                  echo "  -> SUCCESS: Image is available at primary URL."
+              else
+                  echo "  -> INFO: Image not available at primary URL. Checking for a mirror..."
+                  image_repo=$(echo "$image" | cut -d'@' -f1)
+                  image_digest=$(echo "$image" | cut -d'@' -f2)
+                  mirror_found=false
+
+                  # Iterate through the mirror sources to find the longest matching prefix
+                  best_match_source=""
+                  best_match_mirror=""
+                  for i in "${!sources[@]}"; do
+                      source_repo="${sources[$i]}"
+                      
+                      if [[ "$image_repo" == "$source_repo"* ]]; then
+                          # This is a potential match. Check if it's longer than the previous best match.
+                          if [[ ${#source_repo} -gt ${#best_match_source} ]]; then
+                              best_match_source="$source_repo"
+                              best_match_mirror="${mirrors[$i]}"
+                          fi
+                      fi
+                  done
+
+                  if [[ -n "$best_match_source" ]]; then
+                      # A matching mirror prefix was found
+                      image_suffix=${image_repo#$best_match_source}
+                      resolved_url="${best_match_mirror}${image_suffix}@${image_digest}"
+                      
+                      echo "  -> SUCCESS: Found mirror configuration."
+                      echo "  -> Source Prefix: ${best_match_source}"
+                      echo "  -> Mirror Prefix: ${best_match_mirror}"
+                      echo "  -> Resolved URL:  ${resolved_url}"
+                      mirror_found=true
+                  else
+                      # No matching prefix was found in the entire mirror set
+                      echo "  -> FAILURE: No mirror found for source '${image_repo}'"
+                      validation_failed=true
+                  fi
+              fi
+              echo
+          done
+          
+          echo "================================================="
+          
+          if [[ "$validation_failed" == false ]]; then
+              echo "Validation PASSED on attempt ${attempt}."
+              exit 0
+          fi
+
+          if [ $attempt -lt $RETRIES ]; then
+            echo "Validation FAILED on attempt ${attempt}. Retrying in ${RETRY_INTERVAL} seconds..."
+            sleep $RETRY_INTERVAL
+          else
+            echo "Validation FAILED on final attempt ${attempt}."
+          fi
+        done
+
+        echo "All ${RETRIES} validation attempts failed."
+        exit 1

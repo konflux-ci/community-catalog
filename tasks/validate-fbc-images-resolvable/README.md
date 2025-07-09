@@ -1,0 +1,62 @@
+# validate-fbc-images-resolvable (Task)
+
+A standalone Tekton `Task` that validates a File-Based Catalog (FBC) by checking the availability of all its related images. It uses an `ImageDigestMirrorSet` (IDMS) to check for mirrors if a primary image URL is unavailable.
+
+## Overview
+
+The primary goal of this task is to ensure the integrity of an FBC image. It does this by:
+
+1. Rendering the FBC using `opm` to extract a list of all related images.
+
+2. Iterating through each related image and using `skopeo` to verify that it is available at its specified URL.
+
+3. If an image is not available at its primary URL, the script checks for a mirror configuration in the provided `idms-content`.
+
+4. The task passes if all images are either directly available or have a corresponding mirror configuration. It fails if any image is unavailable and has no mirror.
+
+### Retry Mechanism
+
+The task includes a built-in retry mechanism to handle transient network issues or temporary image unavailability. The number of attempts and the interval between them are configurable via parameters.
+
+A timeout for the entire task execution is not handled internally. For that, you should use the `timeout` field on the `TaskRun` or the pipeline task definition.
+
+## Parameters
+
+| Name             | Description                                                 | Optional | Default value |
+| :--------------- | :---------------------------------------------------------- | :------- | :------------ |
+| `fbc-image`      | The FBC image pull spec to be validated.                    | No       | -             |
+| `idms-content`   | The string content of the `ImageDigestMirrorSet` YAML file. | No       | -             |
+| `retries`        | The maximum number of validation attempts.                  | Yes      | `3`           |
+| `retry-interval` | The time to wait between retries, in seconds.               | Yes      | `300`         |
+
+## Dependencies
+
+The task runs on a `registry.access.redhat.com/ubi9/ubi:latest` base image and installs the following tools:
+
+* **`opm v1.52.0`**: Used to render the FBC and list its contents.
+
+* **`skopeo`**: Used to inspect remote container images and verify their availability.
+
+* **`jq`**: Used to parse the `snapshot` JSON.
+
+## Usage Example
+
+This task is designed to be used as a step within a larger Tekton Pipeline. The pipeline is responsible for providing the required parameters, such as the FBC image and the content of the IDMS file.
+
+Here is an example of how to call this task from a `Pipeline`, overriding the default retry settings:
+
+```yaml
+- name: run-fbc-validation
+  runAfter: [ "fetch-idms-file" ]
+  taskRef:
+    name: validate-fbc-images-resolvable
+  params:
+    - name: fbc-image
+      value: $(tasks.parse-metadata.results.fbc-image)
+    - name: idms-content
+      value: $(tasks.fetch-idms-file.results.idms-content)
+    - name: retries
+      value: "3" # The default is 3
+    - name: retry-interval
+      value: "300" # The default is 300 seconds (5 minutes)
+```

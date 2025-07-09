@@ -1,0 +1,130 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: validate-fbc-images-resolvable
+spec:
+  description: |
+    Tekton pipeline to validate a File-Based Catalog (FBC) by checking the
+    availability of all its related images, with support for image mirrors
+    defined in an ImageDigestMirrorSet (IDMS) file.
+  params:
+    - name: SNAPSHOT
+      description: |
+        A JSON string of an ApplicationSnapshot resource spec. A minimal example:
+          {
+            "components": [
+              {
+                "containerImage": "quay.io/example/fbc:latest",
+                "source": {
+                  "git": {
+                    "url": "https://github.com/org/repo",
+                    "revision": "main"
+                  }
+                }
+              }
+            ]
+          }
+      type: string
+    - name: PATH_TO_MIRROR_SET
+      description: Path in the source repository to the ImageDigestMirrorSet file.
+      type: string
+      default: ".tekton/images-mirror-set.yaml"
+    - name: REPO_TOKEN
+      description: The name of the Kubernetes Secret that contains an access token for a private Git repository.
+      type: string
+      default: ""
+    - name: REPO_KEY
+      description: The key within the repo-token-secret that holds the access token.
+      type: string
+      default: ""
+    - name: RETRIES
+      description: The maximum number of validation attempts for the validation task.
+      type: string
+      default: "3"
+    - name: RETRY_INTERVAL
+      description: The time to wait between retries for the validation task, in seconds.
+      type: string
+      default: "300"
+  tasks:
+    - name: parse-metadata
+      taskSpec:
+        description: Extracts required metadata from the input snapshot.
+        params:
+          - name: SNAPSHOT
+            type: string
+        results:
+          - name: fbc-image
+          - name: source-git-url
+          - name: source-git-revision
+        steps:
+          - name: parse
+            image: quay.io/konflux-ci/konflux-test:v1.4.26
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              # The SNAPSHOT parameter is not always valid JSON, so we use string manipulation
+              # to extract the required fields instead of jq.
+              echo "--- Raw SNAPSHOT parameter ---"
+              echo "$(params.SNAPSHOT)"
+              echo "----------------------------"
+
+              # Extract values using grep and sed for robustness
+              FBC_IMAGE=$(echo "$(params.SNAPSHOT)" | grep -o 'containerImage:[^,}]*' | sed 's/containerImage://')
+              SOURCE_URL=$(echo "$(params.SNAPSHOT)" | grep -o 'url:[^,}]*' | sed 's/url://')
+              SOURCE_REV=$(echo "$(params.SNAPSHOT)" | grep -o 'revision:[^,}]*' | sed 's/revision://')
+
+              echo -n "$FBC_IMAGE" > "$(results.fbc-image.path)"
+              echo -n "$SOURCE_URL" > "$(results.source-git-url.path)"
+              echo -n "$SOURCE_REV" > "$(results.source-git-revision.path)"
+              
+              echo "Parsed FBC Image: $(cat $(results.fbc-image.path))"
+              echo "Parsed Git URL: $(cat $(results.source-git-url.path))"
+              echo "Parsed Git Revision: $(cat $(results.source-git-revision.path))"
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+    - name: download-idms-file
+      runAfter: [ "parse-metadata" ]
+      taskRef:
+        resolver: "git"
+        params:
+          # TODO: Before merging, change the url and revision back to the upstream repo and branch
+          - name: url
+            value: https://github.com/fontivan/konflux-ci-community-catalog.git
+          - name: revision
+            value: sskeard/validate-fbc-images-resolvable-pipeline
+          - name: pathInRepo
+            value: tasks/download-file-from-git-repo/download-file-from-git-repo.yaml
+      params:
+        - name: url
+          value: $(tasks.parse-metadata.results.source-git-url)
+        - name: revision
+          value: $(tasks.parse-metadata.results.source-git-revision)
+        - name: pathInRepo
+          value: $(params.PATH_TO_MIRROR_SET)
+        - name: REPO_TOKEN
+          value: $(params.REPO_TOKEN)
+        - name: REPO_KEY
+          value: $(params.REPO_KEY)
+    - name: run-fbc-validation
+      runAfter: [ "download-idms-file" ]
+      taskRef:
+        resolver: "git"
+        params:
+          # TODO: Before merging, change the url and revision back to the upstream repo and branch
+          - name: url
+            value: https://github.com/fontivan/konflux-ci-community-catalog.git
+          - name: revision
+            value: sskeard/validate-fbc-images-resolvable-pipeline
+          - name: pathInRepo
+            value: tasks/validate-fbc-images-resolvable/validate-fbc-images-resolvable.yaml
+      params:
+        - name: fbc-image
+          value: $(tasks.parse-metadata.results.fbc-image)
+        - name: idms-content
+          value: $(tasks.download-idms-file.results.content)
+        - name: retries
+          value: $(params.RETRIES)
+        - name: retry-interval
+          value: $(params.RETRY_INTERVAL)
