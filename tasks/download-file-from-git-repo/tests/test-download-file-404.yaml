@@ -1,0 +1,25 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-download-file-404
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Test handling of 404 errors when file is not found
+  tasks:
+    - name: run-task
+      taskRef:
+        name: download-file-from-git-repo
+      params:
+        - name: url
+          value: "https://github.com/org/repo"
+        - name: revision
+          value: "main"
+        - name: pathInRepo
+          value: "404-test/nonexistent.yaml"
+        - name: REPO_TOKEN
+          value: ""
+        - name: REPO_KEY
+          value: "" 

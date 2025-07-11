@@ -1,0 +1,29 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-validate-fbc-retry
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Test FBC validation retry functionality when validation fails
+  tasks:
+    - name: run-task
+      taskRef:
+        name: validate-fbc-images-resolvable
+      params:
+        - name: fbc-image
+          value: "quay.io/test/unavailable-images:latest"
+        - name: idms-content
+          value: |
+            apiVersion: config.openshift.io/v1
+            kind: ImageDigestMirrorSet
+            metadata:
+              name: test-mirror-set
+            spec:
+              imageDigestMirrors: []
+        - name: retries
+          value: "2"
+        - name: retry-interval
+          value: "5" 

@@ -1,0 +1,33 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-validate-fbc-success
+spec:
+  description: |
+    Test successful FBC validation where all images are available
+  tasks:
+    - name: run-task
+      taskRef:
+        name: validate-fbc-images-resolvable
+      params:
+        - name: fbc-image
+          value: "quay.io/test/fbc:latest"
+        - name: idms-content
+          value: |
+            apiVersion: config.openshift.io/v1
+            kind: ImageDigestMirrorSet
+            metadata:
+              name: test-mirror-set
+            spec:
+              imageDigestMirrors:
+                - source: registry.redhat.io/ubi8
+                  mirrors:
+                    - mirror.example.com/ubi8
+                - source: registry.redhat.io/ubi9
+                  mirrors:
+                    - mirror.example.com/ubi9
+        - name: retries
+          value: "3"
+        - name: retry-interval
+          value: "10" 

@@ -1,0 +1,35 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-validate-fbc-partial-mirror
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Test FBC validation where some images have mirrors and others don't
+  tasks:
+    - name: run-task
+      taskRef:
+        name: validate-fbc-images-resolvable
+      params:
+        - name: fbc-image
+          value: "quay.io/test/partial-mirror:latest"
+        - name: idms-content
+          value: |
+            apiVersion: config.openshift.io/v1
+            kind: ImageDigestMirrorSet
+            metadata:
+              name: test-mirror-set
+            spec:
+              imageDigestMirrors:
+                - source: registry.redhat.io/ubi8
+                  mirrors:
+                    - mirror.example.com/ubi8
+                - source: registry.redhat.io/ubi9
+                  mirrors:
+                    - mirror.example.com/ubi9
+        - name: retries
+          value: "3"
+        - name: retry-interval
+          value: "10" 

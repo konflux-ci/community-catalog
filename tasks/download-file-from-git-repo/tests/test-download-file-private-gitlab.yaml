@@ -1,0 +1,23 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-download-file-private-gitlab
+spec:
+  description: |
+    Test downloading a file from a private GitLab repository
+  tasks:
+    - name: run-task
+      taskRef:
+        name: download-file-from-git-repo
+      params:
+        - name: url
+          value: "https://gitlab.com/org/private-repo"
+        - name: revision
+          value: "main"
+        - name: pathInRepo
+          value: "config.yaml"
+        - name: REPO_TOKEN
+          value: "gitlab-token"
+        - name: REPO_KEY
+          value: "token" 

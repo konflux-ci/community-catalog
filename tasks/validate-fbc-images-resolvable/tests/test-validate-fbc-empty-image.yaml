@@ -1,0 +1,32 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-validate-fbc-empty-image
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Test FBC validation when FBC image parameter is empty
+  tasks:
+    - name: run-task
+      taskRef:
+        name: validate-fbc-images-resolvable
+      params:
+        - name: fbc-image
+          value: ""
+        - name: idms-content
+          value: |
+            apiVersion: config.openshift.io/v1
+            kind: ImageDigestMirrorSet
+            metadata:
+              name: test-mirror-set
+            spec:
+              imageDigestMirrors:
+                - source: registry.redhat.io/ubi8
+                  mirrors:
+                    - mirror.example.com/ubi8
+        - name: retries
+          value: "3"
+        - name: retry-interval
+          value: "10" 
