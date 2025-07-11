@@ -1,0 +1,38 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-check-if-related-test
+spec:
+  description: |
+    Run the check-if-related-test task and check its result.
+  tasks:
+    - name: run-task
+      taskRef:
+        name: check-if-related-test
+      params:
+        - name: pipeline-test-suite
+          value: "rh-advisories"
+        - name: pipeline-used
+          value: "rh-advisories"
+        - name: component-image
+          value: "quay.io/redhat-user-workloads/rhtap-release-2-tenant/release-service-catalog-staging:c60ae2d9db37c82ba7a61eaa4908044363d44f52"
+    - name: check-result
+      runAfter:
+        - run-task
+      params:
+        - name: result
+          value: $(tasks.run-task.results.result)
+      taskSpec:
+        params:
+          - name: result
+            type: string
+        steps:
+          - name: check-result
+            image: quay.io/konflux-ci/release-service-utils:20e010a0dde28e31826ce91914d5852d73437fc2
+            script: |
+              #!/usr/bin/env bash
+              set -eux
+
+              echo "Test that result contains the expected value"
+              test "$(params.result)" == "false"

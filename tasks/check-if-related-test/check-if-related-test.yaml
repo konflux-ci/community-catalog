@@ -1,0 +1,115 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: check-if-related-test
+spec:
+  description: |
+    This task checks if the current test suite is affected by changes in the pull request.
+    It determines if the pipeline under test is among the pipelines affected by the PR,
+    and sets the result accordingly.
+  params:
+    - name: pipeline-test-suite
+      description: The name of the test suite pipeline.
+      type: string
+    - name: pipeline-used
+      description: The pipeline to use for the test suite. If empty, uses pipeline-test-suite.
+      type: string
+    - name: component-image
+      description: The image to use for running the check.
+      type: string
+  results:
+    - name: result
+      description: Check result, "true" if related, "false" if not.
+  steps:
+    - name: run-check
+      image: $(params.component-image)
+      env:
+        - name: PR_NUMBER
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.labels['pac.test.appstudio.openshift.io/pull-request']
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        # Function to check if a word exists in a string
+        # Arguments:
+        #   $1: The word to search for
+        #   $2: The string to search in
+        # Returns:
+        #   0 if word is found, 1 if not found
+        # Example:
+        #   if string_has_word "hello" "say hello world"; then
+        #     echo "Found word"
+        #   fi
+        string_has_word() {
+            local search_word="$1"
+            local search_string="$2"
+            # Add spaces around both strings to ensure word boundaries
+            search_string=" ${search_string} "
+            search_word=" ${search_word} "
+            
+            if [[ "${search_string}" == *"${search_word}"* ]]; then
+                return 0  # Word found
+            else
+                return 1  # Word not found
+            fi
+        }
+
+        # chekton warning :Command appears to be unreachable. Check usage (or ignore if invoked indirectly).
+        # shellcheck disable=SC2317
+        exitfunc() {
+          local err=$1
+          local line=$2
+          local command="$3"
+
+          # After the tests finish, record the overall result in the result variable
+          if [ "$err" -eq 0 ] ; then
+            echo -n "true" | tee "$(results.result.path)"
+            exit 0
+          elif [ "$err" -eq 99 ] ; then
+            # exit code 99 means we have skipped the tests
+            echo -n "false" | tee "$(results.result.path)"
+            exit 0
+          else
+            echo "$0: ERROR $command failed at line $line - exited with status $err"
+            echo -n "false" | tee "$(results.result.path)"
+            exit "$err"
+          fi
+        }
+
+        trap 'exitfunc $? $LINENO "$BASH_COMMAND"' EXIT
+
+        if [[ -z "${PR_NUMBER:-}" ]]; then
+          echo "PR_NUMBER environment variable is not set."
+          exit 99
+        fi
+
+        echo "PR_NUMBER: ${PR_NUMBER}"
+
+        affected_pipelines=$("/home/e2e/tests/scripts/find_release_pipelines_from_pr.sh" \
+          --repo "konflux-ci/release-service-catalog" --pull_request_number "${PR_NUMBER}")
+
+        # if pipeline-used is set, use it, otherwise use pipeline-test-suite
+        pipeline=""
+        if [ -n "$(params.pipeline-used)" ]; then
+          pipeline="$(params.pipeline-used)"
+        else
+          pipeline="$(params.pipeline-test-suite)"
+        fi
+
+        if [[ -z "${pipeline}" ]]; then
+          echo "No pipeline specified to check."
+          exit 99
+        fi
+
+        # Check if pipeline is found as an affected pipeline
+        if string_has_word "${pipeline}" "${affected_pipelines}" || \
+                [[ "${affected_pipelines}" == "release-pipelines" ]]; then
+          echo "This Test Suite is affected by changes in PR ${PR_NUMBER}"
+          exit 0
+        else
+          echo "This Test Suite is not affected by changes in PR ${PR_NUMBER}"
+          exit 99
+        fi
