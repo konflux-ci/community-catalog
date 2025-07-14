@@ -4,14 +4,17 @@ kind: Pipeline
 metadata:
   name: validate-fbc-images-resolvable
 spec:
-  description: |
+  description: >-
     Tekton pipeline to validate a File-Based Catalog (FBC) by checking the
-    availability of all its related images, with support for image mirrors
-    defined in an ImageDigestMirrorSet (IDMS) file.
+    availability of all its related images. It fetches an ImageDigestMirrorSet
+    file from the component's source Git repository to resolve mirrors for
+    unavailable images.
   params:
     - name: SNAPSHOT
       description: |
-        A JSON string of an ApplicationSnapshot resource spec. A minimal example:
+        A JSON string of an ApplicationSnapshot resource spec, provided by Konflux.
+        It contains component details like the container image and source Git repository.
+        A minimal example:
           {
             "components": [
               {
@@ -27,15 +30,15 @@ spec:
           }
       type: string
     - name: PATH_TO_MIRROR_SET
-      description: Path in the source repository to the ImageDigestMirrorSet file.
+      description: The path within the source Git repository to the ImageDigestMirrorSet configuration file.
       type: string
       default: ".tekton/images-mirror-set.yaml"
     - name: REPO_TOKEN
-      description: The name of the Kubernetes Secret that contains an access token for a private Git repository.
+      description: The name of a Kubernetes Secret containing the access token needed to clone a private Git repository.
       type: string
       default: ""
     - name: REPO_KEY
-      description: The key within the repo-token-secret that holds the access token.
+      description: The key within the REPO_TOKEN secret that holds the access token value.
       type: string
       default: ""
     - name: RETRIES
