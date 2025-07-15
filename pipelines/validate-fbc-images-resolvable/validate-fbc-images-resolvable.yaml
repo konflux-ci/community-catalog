@@ -93,11 +93,10 @@ spec:
       taskRef:
         resolver: "git"
         params:
-          # TODO: Before merging, change the url and revision back to the upstream repo and branch
           - name: url
-            value: https://github.com/fontivan/konflux-ci-community-catalog.git
+            value: https://github.com/konflux-ci/community-catalog.git
           - name: revision
-            value: sskeard/validate-fbc-images-resolvable-pipeline
+            value: development
           - name: pathInRepo
             value: tasks/download-file-from-git-repo/download-file-from-git-repo.yaml
       params:
@@ -116,11 +115,10 @@ spec:
       taskRef:
         resolver: "git"
         params:
-          # TODO: Before merging, change the url and revision back to the upstream repo and branch
           - name: url
-            value: https://github.com/fontivan/konflux-ci-community-catalog.git
+            value: https://github.com/konflux-ci/community-catalog.git
           - name: revision
-            value: sskeard/validate-fbc-images-resolvable-pipeline
+            value: development
           - name: pathInRepo
             value: tasks/validate-fbc-images-resolvable/validate-fbc-images-resolvable.yaml
       params:
