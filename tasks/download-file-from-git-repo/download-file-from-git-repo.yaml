@@ -4,25 +4,27 @@ kind: Task
 metadata:
   name: download-file-from-git-repo
 spec:
-  description: Fetches a single file from a Git repository via its raw HTTP endpoint.
+  description: >-
+    A reusable Tekton Task that fetches a single file from a Git repository
+    using its raw HTTP endpoint. It supports both public and private repositories.
   params:
     - name: url
       description: The base URL of the Git repository (e.g., https://github.com/org/repo).
     - name: revision
-      description: The Git revision (branch, tag, or commit SHA).
+      description: The Git revision (branch, tag, or commit SHA) where the file is located.
     - name: pathInRepo
-      description: The path to the file within the repository.
+      description: The full path to the file within the repository.
     - name: REPO_TOKEN
       description: The name of the Kubernetes Secret that contains an access token for a private Git repository.
       type: string
       default: ""
     - name: REPO_KEY
-      description: The key within the REPO_TOKEN secret that holds the access token.
+      description: The key within the REPO_TOKEN secret that holds the access token value.
       type: string
       default: ""
   results:
     - name: content
-      description: The content of the downloaded file.
+      description: The raw string content of the downloaded file.
   steps:
     - name: fetch
       image: quay.io/konflux-ci/konflux-test:v1.4.26

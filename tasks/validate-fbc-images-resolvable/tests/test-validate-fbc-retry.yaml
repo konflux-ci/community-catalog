@@ -26,4 +26,4 @@ spec:
         - name: retries
           value: "2"
         - name: retry-interval
-          value: "5" 
+          value: "5"

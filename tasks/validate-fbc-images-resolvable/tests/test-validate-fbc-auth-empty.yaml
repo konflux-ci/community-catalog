@@ -2,19 +2,17 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-validate-fbc-unavailable-images
-  annotations:
-    test/assert-task-failure: "run-task"
+  name: test-validate-fbc-auth-empty
 spec:
   description: |
-    Test FBC validation when images are unavailable and no mirrors exist
+    Test FBC validation with empty auth-secrets (no authentication)
   tasks:
     - name: run-task
       taskRef:
         name: validate-fbc-images-resolvable
       params:
         - name: fbc-image
-          value: "quay.io/test/unavailable-images:latest"
+          value: "quay.io/test/fbc:latest"
         - name: idms-content
           value: |
             apiVersion: config.openshift.io/v1
@@ -23,10 +21,12 @@ spec:
               name: test-mirror-set
             spec:
               imageDigestMirrors:
-                - source: registry.redhat.io/ubi8
+                - source: registry.example.com/test
                   mirrors:
-                    - mirror.example.com/ubi8
+                    - mirror.example.com/test
+        - name: auth-secrets
+          value: "[]"
         - name: retries
-          value: "3"
+          value: "1"
         - name: retry-interval
-          value: "10"
+          value: "5"
