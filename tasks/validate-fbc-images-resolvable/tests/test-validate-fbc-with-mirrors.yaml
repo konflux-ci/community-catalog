@@ -30,4 +30,4 @@ spec:
         - name: retries
           value: "3"
         - name: retry-interval
-          value: "10" 
+          value: "10"

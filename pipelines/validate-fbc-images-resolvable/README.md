@@ -20,8 +20,11 @@ The primary goal of this integration test is to ensure the integrity of an FBC i
  | ----- | ----- | ----- | ----- | 
 | `SNAPSHOT` | A JSON string of an ApplicationSnapshot spec, provided by Konflux. It contains component details like the container image and source Git repository. | No | \- | 
 | `PATH_TO_MIRROR_SET` | The path within the source Git repository to the `ImageDigestMirrorSet` configuration file. | Yes | `.tekton/images-mirror-set.yaml` | 
+| `AUTH_SECRETS` | **String representation** of a JSON array containing secret name/namespace pairs for registry authentication. Must be provided as a valid JSON string. | Yes | `"[]"` | 
 | `REPO_TOKEN` | The name of a Kubernetes Secret containing the access token needed to clone a private Git repository. | Yes | `""` | 
 | `REPO_KEY` | The key within the `REPO_TOKEN` secret that holds the access token value. | Yes | `""` | 
+| `RETRIES` | The maximum number of validation attempts for the validation task. | Yes | `"3"` | 
+| `RETRY_INTERVAL` | The time to wait between retries for the validation task, in seconds. | Yes | `"300"` | 
 
 ## How It Works
 
@@ -80,3 +83,53 @@ spec:
       - name: pathInRepo
         value: "pipelines/validate-fbc-images-resolvable/validate-fbc-images-resolvable.yaml"
 ```
+
+## AUTH_SECRETS Parameter Usage
+
+The `AUTH_SECRETS` parameter allows you to specify multiple Kubernetes secrets containing registry authentication credentials. **Important: This parameter must be provided as a valid JSON string.**
+
+### Correct Usage Examples
+
+**Option 1: Multi-line JSON format (recommended)**
+```yaml
+    - name: AUTH_SECRETS
+      value: |
+        [
+          {
+            "name": "your-registry-secret",
+            "namespace": "your-namespace"
+          },
+          {
+            "name": "another-registry-secret",
+            "namespace": "your-namespace"
+          }
+        ]
+```
+
+**Option 2: Single-line JSON format**
+```yaml
+    - name: AUTH_SECRETS
+      value: "[{\"name\": \"your-registry-secret\", \"namespace\": \"your-namespace\"}, {\"name\": \"another-registry-secret\", \"namespace\": \"your-namespace\"}]"
+```
+
+### ❌ Invalid JSON format (causes validation error)
+
+```yaml
+    - name: AUTH_SECRETS
+      value: |
+        [
+          {
+            name: "your-registry-secret",  # Missing quotes around property name
+            "namespace": "your-namespace"
+          }
+        ]
+```
+
+This format will cause the error: `ERROR: AUTH_SECRETS must be a valid JSON array` because property names in JSON must be quoted.
+
+### Requirements
+
+- Each secret must be a valid Kubernetes `dockerconfigjson` secret
+- The pipeline requires RBAC permissions to read secrets from the specified namespaces
+- Multiple secrets will be merged into a single authentication configuration
+- The AUTH_SECRETS parameter must be valid JSON format

@@ -8,12 +8,20 @@ spec:
     This task validates a File-Based Catalog (FBC) image by checking for the
     availability of all its related images. It uses an ImageDigestMirrorSet
     (IDMS) to check for mirrors if a primary image URL is unavailable.
-    Includes a configurable retry mechanism.
+    Includes a configurable retry mechanism and support for multiple registry
+    authentication secrets from the Konflux cluster. Requires RBAC permissions
+    to read secrets in the specified namespaces.
   params:
     - name: fbc-image
       description: The FBC image pull spec to be validated.
     - name: idms-content
       description: The string content of the ImageDigestMirrorSet YAML file.
+    - name: auth-secrets
+      description: >-
+        JSON array of secret name/namespace pairs for registry authentication.
+        Must be provided as a valid JSON string.
+      type: string
+      default: "[]"
     - name: retries
       description: The maximum number of validation attempts.
       type: string
@@ -34,19 +42,26 @@ spec:
           value: "$(params.retries)"
         - name: RETRY_INTERVAL
           value: "$(params.retry-interval)"
+        - name: AUTH_SECRETS
+          value: "$(params.auth-secrets)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         echo "--- Installing Dependencies ---"
-        # Install skopeo and jq from dnf
+        # Install skopeo, jq, and kubectl from dnf
         dnf install -y skopeo jq
-        
+
+        # Install kubectl
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        chmod +x kubectl
+        mv kubectl /usr/local/bin/
+
         # Install yq manually as it's not in the default UBI repos
         YQ_VERSION="v4.45.4"
         ARCH=$(uname -m)
-        if [ "$ARCH" == "x86_64" ]; then
-            ARCH="amd64"
+        if [[ "$ARCH" == "x86_64" ]]; then
+          ARCH="amd64"
         fi
         curl -L \
           "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_linux_${ARCH}" \
@@ -59,92 +74,297 @@ spec:
           "https://github.com/operator-framework/operator-registry/releases/download/${OPM_VERSION}/linux-${ARCH}-opm" \
           -o /usr/local/bin/opm
         chmod +x /usr/local/bin/opm
-        
+
         echo "--- Versions ---"
         opm version
         yq --version
         echo "----------------"
-        
+
         if [[ -z "$FBC_IMAGE" || "$FBC_IMAGE" == "null" ]]; then
-            echo "ERROR: FBC_IMAGE is not set."
-            exit 1
+          echo "ERROR: FBC_IMAGE is not set."
+          exit 1
         fi
 
+        # Set up authentication parameters from Kubernetes secrets
+        AUTH_PARAMS=()
+
+        # Process JSON array directly from environment variable
+        if [[ -n "$AUTH_SECRETS" ]] && [[ "$(echo "$AUTH_SECRETS" | tr -d '[:space:]')" != "" ]] && \
+           [[ "$AUTH_SECRETS" != "[]" ]]; then
+          echo "Setting up authentication from Kubernetes secrets..."
+
+          # Validate JSON format
+          if ! echo "$AUTH_SECRETS" | jq . > /dev/null 2>&1; then
+            echo "ERROR: AUTH_SECRETS must be a valid JSON array"
+            exit 1
+          fi
+          
+          # Parse the auth secrets JSON array
+          secret_count=$(echo "$AUTH_SECRETS" | jq 'length')
+          echo "Processing $secret_count authentication secret(s)..."
+
+          # Initialize merged auth file
+          echo '{"auths": {}}' > /tmp/merged_auth.json
+
+          # Process each secret
+          for ((i=0; i<secret_count; i++)); do
+            secret_name=$(echo "$AUTH_SECRETS" | jq -r ".[$i].name")
+            secret_namespace=$(echo "$AUTH_SECRETS" | jq -r ".[$i].namespace")
+
+            echo "Processing secret $((i+1)) of $secret_count: ${secret_name} in namespace ${secret_namespace}"
+
+            # Read the secret from the cluster
+            if ! kubectl get secret "$secret_name" -n "$secret_namespace" \
+              -o jsonpath='{.data.\.dockerconfigjson}' > "/tmp/secret_${i}_b64.txt" 2>/dev/null; then
+              echo "WARNING: Failed to read secret ${secret_name} in namespace ${secret_namespace}"
+              continue
+            fi
+
+            # Check if the secret data is empty
+            if [[ ! -s "/tmp/secret_${i}_b64.txt" ]]; then
+              echo "WARNING: Secret ${secret_name} contains no dockerconfigjson data"
+              continue
+            fi
+
+            # Decode the base64 content (cross-platform approach)
+            if ! base64 -d < "/tmp/secret_${i}_b64.txt" > "/tmp/secret_${i}.json" 2>/dev/null; then
+              echo "WARNING: Failed to decode secret ${secret_name} - not a valid dockerconfigjson secret"
+              continue
+            fi
+
+            # Validate it's a valid JSON
+            if ! jq . "/tmp/secret_${i}.json" > /dev/null 2>&1; then
+              echo "WARNING: Secret ${secret_name} does not contain valid JSON"
+              continue
+            fi
+
+            # Merge with existing auth file using jq
+            jq -s '
+              .[0] as $base |
+              .[1] as $new |
+              $base + {
+                "auths": ($base.auths + $new.auths)
+              }
+            ' /tmp/merged_auth.json "/tmp/secret_${i}.json" > /tmp/merged_auth_temp.json
+
+            mv /tmp/merged_auth_temp.json /tmp/merged_auth.json
+            rm "/tmp/secret_${i}_b64.txt" "/tmp/secret_${i}.json"
+          done
+
+          # Show merged registry count
+          registry_count=$(jq '.auths | length' /tmp/merged_auth.json)
+          echo "Merged authentication for $registry_count registry(ies)"
+
+          if [[ $registry_count -gt 0 ]]; then
+            AUTH_PARAMS=(--authfile /tmp/merged_auth.json)
+          else
+            echo "WARNING: No valid authentication found in any secrets"
+          fi
+        elif [[ -n "${REGISTRY_AUTH_FILE:-}" ]]; then
+          echo "Using existing auth file: ${REGISTRY_AUTH_FILE}"
+          AUTH_PARAMS=(--authfile "${REGISTRY_AUTH_FILE}")
+        elif [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
+          echo "Using username/password authentication"
+          AUTH_PARAMS=(--creds "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}")
+        fi
+
+        echo "Authentication setup: ${AUTH_PARAMS[*]:-"No authentication"}"
+
+        # Helper function to check if error is authentication-related
+        is_auth_error() {
+          local error_msg="$1"
+          if [[ "$error_msg" =~ (authentication|unauthorized|401|403) ]] || \
+             [[ "$error_msg" =~ (access.*denied|login.*required|credentials) ]]; then
+            return 0
+          fi
+          return 1
+        }
+
+        # Initialize array to track successfully validated images
+        declare -a validated_images=()
+
+        # Helper function to check if an image is already validated
+        is_already_validated() {
+          local image="$1"
+          if [[ ${#validated_images[@]} -eq 0 ]]; then
+            return 1
+          fi
+          for validated_image in "${validated_images[@]}"; do
+            if [[ "$validated_image" == "$image" ]]; then
+              return 0
+            fi
+          done
+          return 1
+        }
+
+        # Helper function to mark an image as validated
+        mark_as_validated() {
+          local image="$1"
+          validated_images+=("$image")
+          echo "  -> CACHED: Image marked as validated for future attempts"
+        }
+
         attempt=0
-        while [ $attempt -lt "$RETRIES" ]; do
+        while [[ $attempt -lt "$RETRIES" ]]; do
           attempt=$((attempt+1))
           echo "--- Validation Attempt ${attempt} of ${RETRIES} ---"
-          
+
           echo "Validating FBC: $FBC_IMAGE"
           echo "================================================="
-          
+
           related_images=$(opm render "${FBC_IMAGE}" --skip-tls-verify \
             | jq -r 'select(.schema == "olm.bundle") | .relatedImages[].image' \
             | sort -u)
-          
+
           if [[ -z "$related_images" ]]; then
-              echo "ERROR: No related images found in the FBC."
-              exit 1
+            echo "ERROR: No related images found in the FBC."
+            exit 1
           fi
-          
+
           validation_failed=false
-          
+
           # Load the mirror set into shell arrays for robust processing.
           # The yq query now includes `.spec` to correctly parse the IDMS.
           mapfile -t sources < <(echo "$IDMS_CONTENT" | yq e '.spec.imageDigestMirrors[].source' -)
           mapfile -t mirrors < <(echo "$IDMS_CONTENT" | yq e '.spec.imageDigestMirrors[].mirrors[0]' -)
 
           for image in $related_images; do
-              echo "Checking image: $image"
-              if skopeo inspect "docker://${image}" --tls-verify=false >/dev/null 2>&1; then
-                  echo "  -> SUCCESS: Image is available at primary URL."
-              else
-                  echo "  -> INFO: Image not available at primary URL. Checking for a mirror..."
-                  image_repo=$(echo "$image" | cut -d'@' -f1)
-                  image_digest=$(echo "$image" | cut -d'@' -f2)
+            echo "Checking image: $image"
 
-                  # Iterate through the mirror sources to find the longest matching prefix
-                  best_match_source=""
-                  best_match_mirror=""
-                  for i in "${!sources[@]}"; do
-                      source_repo="${sources[$i]}"
-                      
-                      if [[ "$image_repo" == "$source_repo"* ]]; then
-                          # This is a potential match. Check if it's longer than the previous best match.
-                          if [[ ${#source_repo} -gt ${#best_match_source} ]]; then
-                              best_match_source="$source_repo"
-                              best_match_mirror="${mirrors[$i]}"
-                          fi
-                      fi
-                  done
+            # Skip images that have already been validated in previous attempts
+            if is_already_validated "$image"; then
+              echo "  -> SKIPPED: Image already validated in previous attempt"
+              continue
+            fi
 
-                  if [[ -n "$best_match_source" ]]; then
-                      # A matching mirror prefix was found
-                      image_suffix=${image_repo#"$best_match_source"}
-                      resolved_url="${best_match_mirror}${image_suffix}@${image_digest}"
-                      
-                      echo "  -> SUCCESS: Found mirror configuration."
-                      echo "  -> Source Prefix: ${best_match_source}"
-                      echo "  -> Mirror Prefix: ${best_match_mirror}"
-                      echo "  -> Resolved URL:  ${resolved_url}"
-                  else
-                      # No matching prefix was found in the entire mirror set
-                      echo "  -> FAILURE: No mirror found for source '${image_repo}'"
-                      validation_failed=true
-                  fi
+            # Capture stderr to check for authentication errors
+            set +e
+            timeout 60 skopeo inspect "docker://${image}" --tls-verify=false "${AUTH_PARAMS[@]}" \
+              > "/tmp/stdout_${image//[^a-zA-Z0-9]/_}.txt" \
+              2> "/tmp/stderr_${image//[^a-zA-Z0-9]/_}.txt"
+            skopeo_exit_code=$?
+            set -e
+
+            # Debug output
+            echo "  -> Skopeo exit code: $skopeo_exit_code"
+            echo "  -> Skopeo command: timeout 60 skopeo inspect \"docker://${image}\""
+            echo "     --tls-verify=false ${AUTH_PARAMS[*]}"
+            if [[ -s "/tmp/stdout_${image//[^a-zA-Z0-9]/_}.txt" ]]; then
+              echo "  -> Skopeo stdout: $(cat "/tmp/stdout_${image//[^a-zA-Z0-9]/_}.txt")"
+            fi
+            if [[ -s "/tmp/stderr_${image//[^a-zA-Z0-9]/_}.txt" ]]; then
+              echo "  -> Skopeo stderr: $(cat "/tmp/stderr_${image//[^a-zA-Z0-9]/_}.txt")"
+            fi
+
+            if [[ $skopeo_exit_code -eq 0 ]]; then
+              echo "  -> SUCCESS: Image is available at primary URL."
+              mark_as_validated "$image"
+            else
+              error_output=""
+              if [[ -s "/tmp/stderr_${image//[^a-zA-Z0-9]/_}.txt" ]]; then
+                error_output=$(cat "/tmp/stderr_${image//[^a-zA-Z0-9]/_}.txt")
               fi
-              echo
+
+              if is_auth_error "$error_output"; then
+                echo "  -> ERROR: Authentication failure for primary URL"
+                echo "  -> Error: $error_output"
+                echo "  -> INFO: Checking for a mirror..."
+              else
+                echo "  -> INFO: Image not available at primary URL. Checking for a mirror..."
+              fi
+
+              image_repo=$(echo "$image" | cut -d'@' -f1)
+              image_digest=$(echo "$image" | cut -d'@' -f2)
+
+              # Iterate through the mirror sources to find the longest matching prefix
+              best_match_source=""
+              best_match_mirror=""
+              for i in "${!sources[@]}"; do
+                source_repo="${sources[$i]}"
+
+                if [[ "$image_repo" == "$source_repo"* ]]; then
+                  # This is a potential match. Check if it's longer than the previous best match.
+                  if [[ ${#source_repo} -gt ${#best_match_source} ]]; then
+                    best_match_source="$source_repo"
+                    best_match_mirror="${mirrors[$i]}"
+                  fi
+                fi
+              done
+
+              if [[ -n "$best_match_source" ]]; then
+                # A matching mirror prefix was found
+                image_suffix=${image_repo#"$best_match_source"}
+                resolved_url="${best_match_mirror}${image_suffix}@${image_digest}"
+
+                echo "  -> INFO: Found mirror configuration, testing resolved URL..."
+                echo "  -> Source Prefix: ${best_match_source}"
+                echo "  -> Mirror Prefix: ${best_match_mirror}"
+                echo "  -> Resolved URL:  ${resolved_url}"
+
+                # Check mirror URL with authentication error detection
+                set +e
+                timeout 60 skopeo inspect "docker://${resolved_url}" \
+                  --tls-verify=false "${AUTH_PARAMS[@]}" \
+                  > "/tmp/mirror_stdout_${resolved_url//[^a-zA-Z0-9]/_}.txt" \
+                  2> "/tmp/mirror_stderr_${resolved_url//[^a-zA-Z0-9]/_}.txt"
+                mirror_exit_code=$?
+                set -e
+
+                # Debug output for mirror
+                echo "  -> Mirror skopeo exit code: $mirror_exit_code"
+                echo "  -> Mirror skopeo command: timeout 60 skopeo inspect \"docker://${resolved_url}\""
+                echo "     --tls-verify=false ${AUTH_PARAMS[*]}"
+                if [[ -s "/tmp/mirror_stdout_${resolved_url//[^a-zA-Z0-9]/_}.txt" ]]; then
+                  echo "  -> Mirror skopeo stdout: $(cat "/tmp/mirror_stdout_${resolved_url//[^a-zA-Z0-9]/_}.txt")"
+                fi
+                if [[ -s "/tmp/mirror_stderr_${resolved_url//[^a-zA-Z0-9]/_}.txt" ]]; then
+                  echo "  -> Mirror skopeo stderr: $(cat "/tmp/mirror_stderr_${resolved_url//[^a-zA-Z0-9]/_}.txt")"
+                fi
+
+                if [[ $mirror_exit_code -eq 0 ]]; then
+                  echo "  -> SUCCESS: Image is available at mirror URL."
+                  mark_as_validated "$image"
+                else
+                  mirror_error_output=""
+                  if [[ -s "/tmp/mirror_stderr_${resolved_url//[^a-zA-Z0-9]/_}.txt" ]]; then
+                    mirror_error_output=$(cat "/tmp/mirror_stderr_${resolved_url//[^a-zA-Z0-9]/_}.txt")
+                  fi
+
+                  if is_auth_error "$mirror_error_output"; then
+                    echo "  -> ERROR: Authentication failure for mirror URL"
+                    echo "  -> Error: $mirror_error_output"
+                  else
+                    echo "  -> FAILURE: Image not available at mirror URL either."
+                  fi
+                  validation_failed=true
+                fi
+              else
+                # No matching prefix was found in the entire mirror set
+                echo "  -> FAILURE: No mirror found for source '${image_repo}'"
+                validation_failed=true
+              fi
+            fi
+            echo
           done
-          
+
           echo "================================================="
-          
+
+          # Show validation summary
+          total_images=$(echo "$related_images" | wc -w)
+          validated_count=${#validated_images[@]}
+          remaining_count=$((total_images - validated_count))
+          echo "Validation Summary - Total: $total_images, Validated: $validated_count, Remaining: $remaining_count"
+
           if [[ "$validation_failed" == false ]]; then
-              echo "Validation PASSED on attempt ${attempt}."
-              exit 0
+            echo "Validation PASSED on attempt ${attempt}."
+            exit 0
           fi
 
-          if [ $attempt -lt "$RETRIES" ]; then
+          if [[ $attempt -lt "$RETRIES" ]]; then
             echo "Validation FAILED on attempt ${attempt}. Retrying in ${RETRY_INTERVAL} seconds..."
+            if [[ $validated_count -gt 0 ]]; then
+              echo "Note: $validated_count already validated images will be skipped in the next attempt."
+            fi
             sleep "$RETRY_INTERVAL"
           else
             echo "Validation FAILED on final attempt ${attempt}."
