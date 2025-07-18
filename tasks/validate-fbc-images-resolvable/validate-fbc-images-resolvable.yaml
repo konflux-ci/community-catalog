@@ -16,12 +16,11 @@ spec:
       description: The FBC image pull spec to be validated.
     - name: idms-content
       description: The string content of the ImageDigestMirrorSet YAML file.
-    - name: auth-secrets
+    - name: auth-json
       description: >-
-        JSON array of secret name/namespace pairs for registry authentication.
-        Must be provided as a valid JSON string.
+        JSON object containing the authentication content to use.
       type: string
-      default: "[]"
+      default: '{"auths": {}}'
     - name: retries
       description: The maximum number of validation attempts.
       type: string
@@ -42,20 +41,15 @@ spec:
           value: "$(params.retries)"
         - name: RETRY_INTERVAL
           value: "$(params.retry-interval)"
-        - name: AUTH_SECRETS
-          value: "$(params.auth-secrets)"
+        - name: AUTH_JSON
+          value: "$(params.auth-json)"
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
 
         echo "--- Installing Dependencies ---"
-        # Install skopeo, jq, and kubectl from dnf
+        # Install skopeo and jq from dnf
         dnf install -y skopeo jq
-
-        # Install kubectl
-        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
-        chmod +x kubectl
-        mv kubectl /usr/local/bin/
 
         # Install yq manually as it's not in the default UBI repos
         YQ_VERSION="v4.45.4"
@@ -85,90 +79,10 @@ spec:
           exit 1
         fi
 
-        # Set up authentication parameters from Kubernetes secrets
-        AUTH_PARAMS=()
-
-        # Process JSON array directly from environment variable
-        if [[ -n "$AUTH_SECRETS" ]] && [[ "$(echo "$AUTH_SECRETS" | tr -d '[:space:]')" != "" ]] && \
-           [[ "$AUTH_SECRETS" != "[]" ]]; then
-          echo "Setting up authentication from Kubernetes secrets..."
-
-          # Validate JSON format
-          if ! echo "$AUTH_SECRETS" | jq . > /dev/null 2>&1; then
-            echo "ERROR: AUTH_SECRETS must be a valid JSON array"
-            exit 1
-          fi
-          
-          # Parse the auth secrets JSON array
-          secret_count=$(echo "$AUTH_SECRETS" | jq 'length')
-          echo "Processing $secret_count authentication secret(s)..."
-
-          # Initialize merged auth file
-          echo '{"auths": {}}' > /tmp/merged_auth.json
-
-          # Process each secret
-          for ((i=0; i<secret_count; i++)); do
-            secret_name=$(echo "$AUTH_SECRETS" | jq -r ".[$i].name")
-            secret_namespace=$(echo "$AUTH_SECRETS" | jq -r ".[$i].namespace")
-
-            echo "Processing secret $((i+1)) of $secret_count: ${secret_name} in namespace ${secret_namespace}"
-
-            # Read the secret from the cluster
-            if ! kubectl get secret "$secret_name" -n "$secret_namespace" \
-              -o jsonpath='{.data.\.dockerconfigjson}' > "/tmp/secret_${i}_b64.txt" 2>/dev/null; then
-              echo "WARNING: Failed to read secret ${secret_name} in namespace ${secret_namespace}"
-              continue
-            fi
-
-            # Check if the secret data is empty
-            if [[ ! -s "/tmp/secret_${i}_b64.txt" ]]; then
-              echo "WARNING: Secret ${secret_name} contains no dockerconfigjson data"
-              continue
-            fi
-
-            # Decode the base64 content (cross-platform approach)
-            if ! base64 -d < "/tmp/secret_${i}_b64.txt" > "/tmp/secret_${i}.json" 2>/dev/null; then
-              echo "WARNING: Failed to decode secret ${secret_name} - not a valid dockerconfigjson secret"
-              continue
-            fi
-
-            # Validate it's a valid JSON
-            if ! jq . "/tmp/secret_${i}.json" > /dev/null 2>&1; then
-              echo "WARNING: Secret ${secret_name} does not contain valid JSON"
-              continue
-            fi
-
-            # Merge with existing auth file using jq
-            jq -s '
-              .[0] as $base |
-              .[1] as $new |
-              $base + {
-                "auths": ($base.auths + $new.auths)
-              }
-            ' /tmp/merged_auth.json "/tmp/secret_${i}.json" > /tmp/merged_auth_temp.json
-
-            mv /tmp/merged_auth_temp.json /tmp/merged_auth.json
-            rm "/tmp/secret_${i}_b64.txt" "/tmp/secret_${i}.json"
-          done
-
-          # Show merged registry count
-          registry_count=$(jq '.auths | length' /tmp/merged_auth.json)
-          echo "Merged authentication for $registry_count registry(ies)"
-
-          if [[ $registry_count -gt 0 ]]; then
-            AUTH_PARAMS=(--authfile /tmp/merged_auth.json)
-          else
-            echo "WARNING: No valid authentication found in any secrets"
-          fi
-        elif [[ -n "${REGISTRY_AUTH_FILE:-}" ]]; then
-          echo "Using existing auth file: ${REGISTRY_AUTH_FILE}"
-          AUTH_PARAMS=(--authfile "${REGISTRY_AUTH_FILE}")
-        elif [[ -n "${REGISTRY_USERNAME:-}" && -n "${REGISTRY_PASSWORD:-}" ]]; then
-          echo "Using username/password authentication"
-          AUTH_PARAMS=(--creds "${REGISTRY_USERNAME}:${REGISTRY_PASSWORD}")
-        fi
-
-        echo "Authentication setup: ${AUTH_PARAMS[*]:-"No authentication"}"
+        # Configure authentication from input parameters
+        echo "$AUTH_JSON" > /tmp/auth.json
+        REGISTRY_AUTH_FILE="/tmp/auth.json"
+        AUTH_PARAMS=(--authfile "${REGISTRY_AUTH_FILE}")
 
         # Helper function to check if error is authentication-related
         is_auth_error() {

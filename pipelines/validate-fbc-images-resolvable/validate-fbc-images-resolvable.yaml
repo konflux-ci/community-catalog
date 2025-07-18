@@ -98,7 +98,6 @@ spec:
         - name: SNAPSHOT
           value: $(params.SNAPSHOT)
     - name: download-idms-file
-      runAfter: [ "parse-metadata" ]
       taskRef:
         resolver: "git"
         params:
@@ -119,8 +118,21 @@ spec:
           value: $(params.REPO_TOKEN)
         - name: REPO_KEY
           value: $(params.REPO_KEY)
+    - name: combine-dockercfgjson-secrets
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/community-catalog.git
+          - name: revision
+            value: development
+          - name: pathInRepo
+            value: tasks/combine-dockercfgjson-secrets/combine-dockercfgjson-secrets.yaml
+      params:
+        - name: auth-secrets
+          value: $(params.AUTH_SECRETS)
     - name: run-fbc-validation
-      runAfter: [ "download-idms-file" ]
+      runAfter: [ "parse-metadata", "download-idms-file", "combine-dockercfgjson-secrets" ]
       taskRef:
         resolver: "git"
         params:
@@ -135,8 +147,8 @@ spec:
           value: $(tasks.parse-metadata.results.fbc-image)
         - name: idms-content
           value: $(tasks.download-idms-file.results.content)
-        - name: auth-secrets
-          value: $(params.AUTH_SECRETS)
+        - name: auth-json
+          value: $(tasks.combine-dockercfgjson-secrets.results.auth-json)
         - name: retries
           value: $(params.RETRIES)
         - name: retry-interval

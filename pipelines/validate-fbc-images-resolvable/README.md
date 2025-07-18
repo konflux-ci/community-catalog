@@ -28,27 +28,42 @@ The primary goal of this integration test is to ensure the integrity of an FBC i
 
 ## How It Works
 
-This repository contains two main components:
+This repository contains three main components:
 
-1. **`validate-fbc-images-resolvable` (Task)**: A custom Tekton `Task` that contains the core validation logic. It installs dependencies and runs the validation script against a given FBC image and IDMS content.
+1. **`validate-fbc-images-resolvable` (Task)**: A custom Tekton `Task` that contains the core validation logic. It takes pre-combined authentication data and runs the validation script against a given FBC image and IDMS content.
 
-2. **`validate-fbc-images-resolvable` (Pipeline)**: A Tekton `Pipeline` that orchestrates the entire validation process by chaining together several tasks:
+2. **`combine-dockercfgjson-secrets` (Task)**: A custom Tekton `Task` that combines multiple Docker config JSON secrets into a single authentication configuration. It reads secrets from the cluster and merges them into a unified auth file.
+
+3. **`validate-fbc-images-resolvable` (Pipeline)**: A Tekton `Pipeline` that orchestrates the entire validation process by chaining together several tasks:
 
    * **`parse-metadata`**: Extracts the FBC image URL and source Git repository details from the `SNAPSHOT` parameter.
 
-   * **`fetch-idms-file`**: Downloads the `ImageDigestMirrorSet` file from the source repository. It can use the `REPO_TOKEN` and `REPO_KEY` parameters to authenticate with private repositories.
+   * **`download-idms-file`**: Downloads the `ImageDigestMirrorSet` file from the source repository. It can use the `REPO_TOKEN` and `REPO_KEY` parameters to authenticate with private repositories.
 
-   * **`run-fbc-validation`**: Executes the `validate-fbc-images-resolvable` custom `Task`, passing the FBC image and the fetched IDMS content as parameters.
+   * **`combine-dockercfgjson-secrets`**: Reads and combines multiple Docker config JSON secrets from the cluster into a single authentication configuration.
+
+   * **`run-fbc-validation`**: Executes the `validate-fbc-images-resolvable` custom `Task`, passing the FBC image, the fetched IDMS content, and the combined authentication data as parameters.
 
 ## Dependencies
 
-The validation task runs on a `registry.access.redhat.com/ubi9/ubi:latest` base image and installs the following tools:
+The pipeline uses multiple tasks, each with their own dependencies:
+
+### validate-fbc-images-resolvable task
+Runs on a `registry.access.redhat.com/ubi9/ubi:latest` base image and installs:
 
 * **`opm v1.52.0`**: Used to render the FBC and list its contents.
-
 * **`skopeo`**: Used to inspect remote container images and verify their availability.
+* **`jq`**: Used to parse JSON and validate authentication data.
+* **`yq v4.45.4`**: Used to parse the IDMS YAML content.
 
-* **`jq`**: Used to parse the `SNAPSHOT` JSON.
+### combine-dockercfgjson-secrets task
+Runs on a `registry.access.redhat.com/ubi9/ubi:latest` base image and installs:
+
+* **`jq`**: Used to parse and merge authentication JSON data.
+* **`kubectl`**: Used to read authentication secrets from the Kubernetes cluster.
+
+### parse-metadata task
+Uses inline `jq` to parse the `SNAPSHOT` JSON parameter.
 
 ## Configuration and Usage
 
@@ -130,6 +145,6 @@ This format will cause the error: `ERROR: AUTH_SECRETS must be a valid JSON arra
 ### Requirements
 
 - Each secret must be a valid Kubernetes `dockerconfigjson` secret
-- The pipeline requires RBAC permissions to read secrets from the specified namespaces
+- The pipeline requires RBAC permissions to read secrets from the specified namespaces (used by the `combine-dockercfgjson-secrets` task)
 - Multiple secrets will be merged into a single authentication configuration
 - The AUTH_SECRETS parameter must be valid JSON format

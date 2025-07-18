@@ -5,7 +5,7 @@ metadata:
   name: test-validate-fbc-auth-empty
 spec:
   description: |
-    Test FBC validation with empty auth-secrets (no authentication)
+    Test FBC validation with empty authentication
   tasks:
     - name: run-task
       taskRef:
@@ -21,11 +21,17 @@ spec:
               name: test-mirror-set
             spec:
               imageDigestMirrors:
-                - source: registry.example.com/test
+                - source: registry.redhat.io/ubi8
                   mirrors:
-                    - mirror.example.com/test
-        - name: auth-secrets
-          value: "[]"
+                    - mirror.example.com/ubi8
+                - source: registry.redhat.io/ubi9
+                  mirrors:
+                    - mirror.example.com/ubi9
+        - name: auth-json
+          value: |
+            {
+              "auths": {}
+            }
         - name: retries
           value: "1"
         - name: retry-interval
