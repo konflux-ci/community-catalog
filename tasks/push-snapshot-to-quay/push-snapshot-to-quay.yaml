@@ -24,6 +24,10 @@ spec:
     - name: snapshot
       description: Namespaced name of snapshot - should be in format "namespace/name"
       type: string
+    - name: copyAllAttestations
+      description:  If true, copy all discoverable attestations and signatures
+      type: string
+      default: "true"
   steps:
     - name: check-release-status
       image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
@@ -90,7 +94,11 @@ spec:
             jq -s 'reduce .[] as $item ({}; . * $item)' \
               "$SOURCE_AUTH_FILE" "$DEST_AUTH_FILE" > "$DOCKER_CONFIG"/config.json
 
-            cosign copy -f "$2" "$3:$4"
+            if [[ "$(params.copyAllAttestations)" == "false" ]]; then
+                skopeo copy --all "docker://$2" "docker://$3"
+            else
+                cosign copy -f "$2" "$3:$4"
+            fi
 
             echo "Pushed image $2 to repository $3:$4"
           else

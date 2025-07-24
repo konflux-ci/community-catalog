@@ -4,6 +4,11 @@ set -eux
 # mocks to be injected into task step scripts
 
 function cosign() {
+  if [[ "$PIPELINERUN_NAME" == "test-push-snapshot-to-quay-skip-attestations" ]]; then
+    echo "Error: cosign should not be called when copyAllAttestations is false"
+    exit 1
+  fi
+
   # mock cosign failing for the no-permission test
   if [[ "$*" == "copy -f quay.io/no-permission:tag "*":"* ]]
   then
@@ -18,9 +23,26 @@ function cosign() {
   fi
 }
 
+function skopeo() {
+  if [[ "$PIPELINERUN_NAME" != "test-push-snapshot-to-quay-skip-attestations" ]]; then
+    echo "Error: skopeo should only be called when copyAllAttestations is false"
+    exit 1
+  fi
+
+  # mock skopeo failing for the no-permission test
+  if [[ "$*" == "copy --all docker://quay.io/no-permission:tag docker://"* ]]; then
+    echo Invalid credentials for quay.io/no-permission:tag
+    return 1
+  fi
+
+  if [[ "$*" != "copy --all docker://quay.io/valid-repo:tag docker://quay.io/default-repo2" ]]; then
+    echo "Error: Unexpected call to skopeo: $*"
+    exit 1
+  fi
+}
+
 function kubectl() {
-  if [[ "$*" == *"snapshot"* ]]
-  then
+  if [[ "$*" == *"snapshot"* ]]; then
     if [[ "$3" == "nopermission" ]]; then
       TEST_IMAGE="quay.io/no-permission:tag"
     elif [[ "$3" == "skip-image" ]]; then
