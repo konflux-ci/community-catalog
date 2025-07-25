@@ -108,8 +108,8 @@ do
   $NO_DEBUG || echo "  Task/Pipeline name: $ITEM_NAME"
 
   # Variables for description of README.md
-  METADATA_NAME=$(yq .metadata.name "$ITEM_PATH")
-  SPEC_DESCRIPTION=$(yq .spec.description "$ITEM_PATH")
+  METADATA_NAME=$(yq -r .metadata.name "$ITEM_PATH")
+  SPEC_DESCRIPTION=$(yq -r .spec.description "$ITEM_PATH")
 
   # Variables for table
   PARAMS=$(yq .spec.params "$ITEM_PATH")
@@ -122,9 +122,9 @@ do
 
   for ((i=0; i < $(yq length <<< "$PARAMS"); i++)); do
     # Get rid of newlines and remove trailing whitespace
-    NAME="$(yq .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    DESCRIPTION="$(yq .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    DEFAULT="$(yq .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    NAME="$(yq -r .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    DESCRIPTION="$(yq -r .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    DEFAULT="$(yq -r .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
     if [[ ${#NAME} -gt $LONGEST_NAME ]]; then
       LONGEST_NAME=${#NAME}
@@ -169,9 +169,9 @@ do
     # Print remaining rows of table
     for ((i=0; i < $(yq length <<< "$PARAMS"); i++)); do
       # Get rid of newlines and remove trailing whitespace
-      NAME="$(yq .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-      DESCRIPTION="$(yq .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-      DEFAULT="$(yq .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      NAME="$(yq -r .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      DESCRIPTION="$(yq -r .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      DEFAULT="$(yq -r .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
       printf "| $NAME %*s" "$(($LONGEST_NAME-${#NAME}))"
       printf "| $DESCRIPTION %*s" "$(($LONGEST_DESCRIPTION-${#DESCRIPTION}))"
