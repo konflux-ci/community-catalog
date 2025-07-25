@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2183
+# SC2183 - This format string has 2 variables, but is passed 1 argument.
+# disabled because printf statements in this script needs an unknown number of variables to be empty
 
 # Automatically generates a README.md for tasks and pipelines.
 # Without the '--dry-run' flag, this will automatically replace the current task/pipeline README.md
@@ -38,6 +41,7 @@ show_help() {
 DRY_RUN=false
 NO_DEBUG=false
 CLI_README_ITEMS=()
+PYTHON_ONLY_FLAG=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -92,6 +96,14 @@ do
   fi
 done
 
+# Checking which yq is being used - Python version requires -r flag
+if [[ "$(yq --version)" != *mikefarah* ]]; then
+  $NO_DEBUG || echo "Using Python version of yq"
+  PYTHON_ONLY_FLAG="-r"
+else
+  $NO_DEBUG || echo "Using Go version of yq"
+fi
+
 # Creating after checking all directories exist to simplify cleanup
 TEMP_README=$(mktemp)
 
@@ -108,11 +120,11 @@ do
   $NO_DEBUG || echo "  Task/Pipeline name: $ITEM_NAME"
 
   # Variables for description of README.md
-  METADATA_NAME=$(yq .metadata.name "$ITEM_PATH")
-  SPEC_DESCRIPTION=$(yq .spec.description "$ITEM_PATH")
+  METADATA_NAME=$(yq $PYTHON_ONLY_FLAG .metadata.name "$ITEM_PATH")
+  SPEC_DESCRIPTION=$(yq $PYTHON_ONLY_FLAG .spec.description "$ITEM_PATH")
 
   # Variables for table
-  PARAMS=$(yq .spec.params "$ITEM_PATH")
+  PARAMS=$(yq $PYTHON_ONLY_FLAG .spec.params "$ITEM_PATH")
 
   # Get the maximum length for each column of table
   LONGEST_NAME=0
@@ -120,11 +132,11 @@ do
   LONGEST_DEFAULT=13
   LONGEST_OPTIONAL=8
 
-  for ((i=0; i < $(yq length <<< "$PARAMS"); i++)); do
+  for ((i=0; i < $(yq $PYTHON_ONLY_FLAG length <<< "$PARAMS"); i++)); do
     # Get rid of newlines and remove trailing whitespace
-    NAME="$(yq .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    DESCRIPTION="$(yq .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    DEFAULT="$(yq .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    NAME="$(yq $PYTHON_ONLY_FLAG .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    DESCRIPTION="$(yq $PYTHON_ONLY_FLAG .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    DEFAULT="$(yq $PYTHON_ONLY_FLAG .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
     if [[ ${#NAME} -gt $LONGEST_NAME ]]; then
       LONGEST_NAME=${#NAME}
@@ -155,38 +167,38 @@ do
     echo
 
     # Print first row of table
-    printf '| Name %*s' "$(($LONGEST_NAME-4))"
-    printf '| Description %*s' "$(($LONGEST_DESCRIPTION-11))"
-    printf '| Optional %*s' "$(($LONGEST_OPTIONAL-8))"
-    printf '| Default value %*s|\n' "$(($LONGEST_DEFAULT-13))"
+    printf '| Name %*s' "$((LONGEST_NAME-4))"
+    printf '| Description %*s' "$((LONGEST_DESCRIPTION-11))"
+    printf '| Optional %*s' "$((LONGEST_OPTIONAL-8))"
+    printf '| Default value %*s|\n' "$((LONGEST_DEFAULT-13))"
 
     # Print second row of table
-    printf '|-%*s-' "$(($LONGEST_NAME))" | tr ' ' '-'
-    printf '|-%*s-' "$(($LONGEST_DESCRIPTION))" | tr ' ' '-'
-    printf '|-%*s-' "$(($LONGEST_OPTIONAL))" | tr ' ' '-'
-    printf '|-%*s-|\n' "$(($LONGEST_DEFAULT))" | tr ' ' '-'
+    printf '|-%*s-' "$((LONGEST_NAME))" | tr ' ' '-'
+    printf '|-%*s-' "$((LONGEST_DESCRIPTION))" | tr ' ' '-'
+    printf '|-%*s-' "$((LONGEST_OPTIONAL))" | tr ' ' '-'
+    printf '|-%*s-|\n' "$((LONGEST_DEFAULT))" | tr ' ' '-'
 
     # Print remaining rows of table
-    for ((i=0; i < $(yq length <<< "$PARAMS"); i++)); do
+    for ((i=0; i < $(yq $PYTHON_ONLY_FLAG length <<< "$PARAMS"); i++)); do
       # Get rid of newlines and remove trailing whitespace
-      NAME="$(yq .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-      DESCRIPTION="$(yq .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-      DEFAULT="$(yq .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      NAME="$(yq $PYTHON_ONLY_FLAG .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      DESCRIPTION="$(yq $PYTHON_ONLY_FLAG .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+      DEFAULT="$(yq $PYTHON_ONLY_FLAG .[$i].default <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
-      printf "| $NAME %*s" "$(($LONGEST_NAME-${#NAME}))"
-      printf "| $DESCRIPTION %*s" "$(($LONGEST_DESCRIPTION-${#DESCRIPTION}))"
+      printf "| $NAME %*s" "$((LONGEST_NAME-${#NAME}))"
+      printf "| $DESCRIPTION %*s" "$((LONGEST_DESCRIPTION-${#DESCRIPTION}))"
 
       # Check that default doesn't exist
-      if [[ $(yq ".[$i] | has(\"default\")" <<< "$PARAMS") == "false" ]]; then
-        printf "| No %*s" "$(($LONGEST_OPTIONAL-2))"
-        printf "| - %*s|\n" "$(($LONGEST_DEFAULT-1))"
+      if [[ $(yq $PYTHON_ONLY_FLAG ".[$i] | has(\"default\")" <<< "$PARAMS") == "false" ]]; then
+        printf "| No %*s" "$((LONGEST_OPTIONAL-2))"
+        printf "| - %*s|\n" "$((LONGEST_DEFAULT-1))"
       else
         # Special case to show default empty strings as "" in table
         if [[ -z "$DEFAULT" ]]; then
           DEFAULT="\"\""
         fi
-        printf "| Yes %*s" "$(($LONGEST_OPTIONAL-3))"
-        printf "| $DEFAULT %*s|\n" "$(($LONGEST_DEFAULT-${#DEFAULT}))"
+        printf "| Yes %*s" "$((LONGEST_OPTIONAL-3))"
+        printf "| $DEFAULT %*s|\n" "$((LONGEST_DEFAULT-${#DEFAULT}))"
       fi
     done
   } > "$TEMP_README"
