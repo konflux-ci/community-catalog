@@ -113,23 +113,83 @@ Before a pull request can be merged:
 
 ## Tekton Task Testing
 
-When a pull request is opened, Tekton Task tests are run for all the task directories that are being modified.
+When a pull request is opened, Tekton Task tests are run for all the task directories
+that are being modified.
 
-The Github workflow is defined in .github/workflows/tekton_task_tests.yaml
+The Github workflow is defined in
+[.github/workflows/tekton_task_tests.yaml](.github/workflows/tekton_task_tests.yaml)
 
-Tests are required for all tenant tasks that are added. A check is run to ensure that all tasks have a `tests/` directory.
+### Adding new Tekton Task tests
 
-## Checkton check
+Tests are defined as Tekton Pipelines inside the `tests` subdirectory of the task
+directory. Their filenames must match `test*.yaml` and the Pipeline name must be
+the same as the filename (sans `.yaml`).
 
-This repository uses [checkton](https://github.com/chmeliik/checkton) to run [shellcheck](https://www.shellcheck.net) on the embedded shell in the Tekton resources.
+E.g. to add a test pipeline for `tasks/apply-mapping`, you can add a pipeline
+such as `tasks/apply-mapping/tests/test-apply-mapping.yaml`.
 
-This check shows itself as the `Linters / checkton (pull_request)` check on the pull request.
+To reference the task under test in a test pipeline, use just the name - the test
+script will install the task CR locally. For example:
 
-If it fails and you click details, the tool does a pretty good job of highlighting the failures and telling you how to fix them.
+```yaml
+- name: run-task
+    taskRef:
+      name: apply-mapping
+```
 
-We strive to have all of our tekton resources abide by shellcheck, so this check is mandatory for pull requests submitted to this repo.
+Task tests are required for all new tasks. For task updates, if the task doesn't currently have tests, adding them is not strictly required, but is recommended.
 
-##### Mocking commands executed in task scripts
+#### Testing scenarios where the Task is expected to fail
+
+When testing Tasks, most tests will test a positive outcome - that for some input, the task will pass
+and provide the correct output. But sometimes it's desirable to test that a Task fails when
+it's expected to fail, for example when invalid data is supplied as input for the Task.
+But if the Task under test fails in the test Pipeline, the whole Pipeline will fail too. So we need
+a way to tell the test script that the given test Pipeline is expected to fail.
+
+You can do this by adding the annotation `test/assert-task-failure`
+to the test pipeline object. This annotation will specify which task (`.spec.tasks[*].name`)
+in the pipeline is expected to fail. For example:
+
+```yaml
+---
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: test-apply-mapping-fail-on-empty
+  annotations:
+    test/assert-task-failure: "run-task"
+```
+
+When this annotation is present, the test script will test that the pipeline fails
+and also that it fails in the expected task.
+
+#### Workspaces
+
+Some tasks require one or multiple workspaces. This means that the test pipeline will also
+have to declare a workspace and bind it to the workspace(s) required by the task under test.
+
+Currently, the test script will pass a single workspace named `tests-workspace` mapping
+to a 10Mi volume when starting the pipelinerun. This workspace can be used in the test pipeline.
+
+#### Test Setup
+
+Some task tests will require setup on the kind cluster before the test pipeline can run.
+Certain things can be done in a setup task as part of the test pipeline, but others cannot.
+For example, something like installing a CRD or modifying permissions for the service account that will
+execute the test pipeline must be done before the test pipeline is executed.
+
+In order to achieve this, a `pre-apply-task-hook.sh` script can be created in the `tests` directory for
+a task. When the CI runs the testing, it will first check for this file. If it is found, it is executed
+before the test pipeline. This script will run as the `kubeadmin` user. This approach is copied from the
+tekton catalog repository. For more details and examples, look
+[here](https://github.com/tektoncd/catalog/blob/main/CONTRIBUTING.md#end-to-end-testing).
+
+Note: [mikefarah/yq](https://github.com/mikefarah/yq) is the expected version of `yq` for scripts in this repository.
+A different `yq` command could lead to unexpected problems. You can check if you have the correct `yq` with `yq --version`.
+You should get an output containing `(https://github.com/mikefarah/yq/)`.
+
+#### Mocking commands executed in task scripts
 
 Mocks are needed when we want to test tasks which call external services (e.g. `skopeo copy`,
 `cosign download`, or even a python script from our release-utils image such as `create_container_image` that would
@@ -207,3 +267,46 @@ For reference implementation, check [push-snapshot-to-quay/tests/](tasks/push-sn
 Note: The approach described above shows the recommended approach. But there may be variations
 depending on your needs. For example, you could have several mocks files and inject different
 files to different steps in your task.
+
+### Running Tekton Task tests manually
+
+Requirements:
+
+* A k8s cluster running and kubectl default context pointing to it (e.g. [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation))
+* Tekton installed in the cluster ([docs](https://tekton.dev/docs/pipelines/install/))
+
+```
+kubectl apply --filename https://storage.googleapis.com/tekton-releases/pipeline/latest/release.yaml
+```
+
+* tkn cli installed ([docs](https://tekton.dev/docs/cli/))
+
+* jq installed
+
+Once you have everything ready, you can run the test script and pass task version directories
+as arguments, e.g.
+
+```
+./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping
+```
+
+This will install the task and run all test pipelines matching `tests/test*.yaml`.
+
+Another option is to run one or more tests directly:
+
+```
+./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping/tests/test-apply-mapping.yaml
+```
+
+This will still install the task and run `pre-apply-task-hook.sh` if present, but it will then
+run only the specified test pipeline.
+
+## Checkton check
+
+This repository uses [checkton](https://github.com/chmeliik/checkton) to run [shellcheck](https://www.shellcheck.net) on the embedded shell in the Tekton resources.
+
+This check shows itself as the `Linters / checkton (pull_request)` check on the pull request.
+
+If it fails and you click details, the tool does a pretty good job of highlighting the failures and telling you how to fix them.
+
+We strive to have all of our tekton resources abide by shellcheck, so this check is mandatory for pull requests submitted to this repo.
