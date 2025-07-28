@@ -8,6 +8,7 @@
 # - Connection to a running k8s cluster (e.g. kind)
 # - Tekton installed on the cluster
 # - tkn installed
+# - yq installed (mikefarah/yq)
 #
 # Examples of usage:
 # export TEST_ITEMS="mydir/tasks/apply-mapping some/other/dir"
