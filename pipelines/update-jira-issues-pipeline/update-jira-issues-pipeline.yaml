@@ -1,0 +1,83 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: update-jira-issues-pipeline
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: |-
+    Pipeline to extract JIRA issues from PR names and update them using the update-jira-issues task.
+    This pipeline is triggered by PR merges and will:
+    1. Extract JIRA issue IDs from the PR name/title
+    2. Update the JIRA issues using the update-jira-issues task
+  params:
+    - name: release
+      type: string
+      description:
+        The namespaced name (namespace/name) of the Release custom resource initiating this pipeline execution
+    - name: releasePlan
+      type: string
+      description: The namespaced name (namespace/name) of the releasePlan
+    - name: snapshot
+      type: string
+      description: The namespaced name (namespace/name) of the snapshot
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+      default: main
+    - name: jira_server
+      type: string
+      description: The server of the Jira instance to update issues on
+      default: issues.redhat.com
+    - name: jira_project_regex
+      type: string
+      description: The regex to match the Jira project to update issues on
+      default: "OCPBUGS-[0-9]+"
+    - name: jira_target_state
+      type: string
+      description: The target Jira state to transition issues to
+      default: "ON_QA"
+    - name: jira_skip_states
+      type: string
+      description: The Jira states that should be skipped
+      default: "Verified,Release Pending,Closed"
+  workspaces:
+    - name: data
+      description: The workspace where the snapshot spec json file resides
+  tasks:
+    - name: update-jira-issues
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/update-jira-issues/update-jira-issues.yaml
+      params:
+        - name: taskGitUrl
+          value: $(params.taskGitUrl)
+        - name: taskGitRevision
+          value: $(params.taskGitRevision)
+        - name: snapshot
+          type: string
+          description: The namespaced name (namespace/name) of the snapshot
+          value: $(params.snapshot)
+        - name: jira_server
+          value: $(params.jira_server)
+        - name: jira_project_regex
+          value: $(params.jira_project_regex)
+        - name: jira_target_state
+          value: $(params.jira_target_state)
+        - name: jira_skip_states
+          value: $(params.jira_skip_states)
+      workspaces:
+        - name: data
+          workspace: release-workspace

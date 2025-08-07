@@ -1,0 +1,28 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-update-jira-issues-skip-on-qa
+spec:
+  description: |
+    Run the update-jira-issues task with a snapshot that results in an issue
+    already in the target state (ON_QA). The task should skip the issue and exit successfully.
+  workspaces:
+    - name: tests-workspace
+      description: The workspace provided by the CI system for testing
+  tasks:
+    - name: run-task
+      taskRef:
+        name: update-jira-issues
+      params:
+        - name: snapshot
+          value: "default/konflux-test-container-98765"
+        - name: jira_server
+          value: "issues.redhat.com"
+        - name: jira_project_regex
+          value: "OCPBUGS-[0-9]+"
+        - name: jira_target_state
+          value: "ON_QA"
+      workspaces:
+        - name: data
+          workspace: tests-workspace

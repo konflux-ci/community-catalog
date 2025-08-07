@@ -1,0 +1,170 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: update-jira-issues
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: >
+    Tekton task to update issue to a specified target state (default: on_qa) referenced in the merge.
+    It is meant to run after a staging build is released.
+    A comment will be added to the issue with a link to the staging build it was fixed in.
+
+    Note: This task currently only supports issues in issues.redhat.com due to it requiring authentication.
+    Issues in other servers will be skipped without the task failing.
+  params:
+    - name: snapshot
+      type: string
+      description: The namespaced name (namespace/name) of the snapshot
+    - name: jira_server
+      type: string
+      description: The server of the Jira instance to update issues on
+      default: issues.redhat.com
+    - name: jira_project_regex
+      type: string
+      description: The regex to match the Jira project to update issues on
+      default: "OCPBUGS-[0-9]+"
+    - name: jira_target_state
+      type: string
+      description: The target Jira state to transition issues to
+      default: "ON_QA"
+    - name: jira_skip_states
+      type: string
+      description: The Jira states that should be skipped
+      default: "Verified,Release Pending,Closed"
+  workspaces:
+    - name: data
+      description: The workspace where the snapshot spec json file resides
+  steps:
+    - name: update-issues
+      image: quay.io/konflux-ci/release-service-utils:b7f90a1dde20efe9a4063c1082c4f0ce31113bb1
+      computeResources:
+        limits:
+          memory: 32Mi
+        requests:
+          memory: 32Mi
+          cpu: 50m
+      env:
+        - name: JIRA_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-jira-secret
+              key: token
+      script: |
+        #!/usr/bin/env bash
+        # We do not set -x here because it would leak the ACCESS_TOKEN
+        set -eu
+
+        ISSUE_TRACKERS='{
+            "Jira": {
+                "api": "rest/api/2/issue",
+                "servers": [
+                    "issues.redhat.com",
+                    "jira.atlassian.com"
+                ]
+            },
+            "bugzilla": {
+                "api": "rest/bug",
+                "servers": [
+                    "bugzilla.redhat.com"
+                ]
+            }
+        }'
+
+        snapshotRef=$(params.snapshot)
+        jira_project_regex=$(params.jira_project_regex)
+        server=$(params.jira_server)
+        target_state=$(params.jira_target_state)
+        skip_states="$(params.jira_skip_states)"
+
+        components=$(kubectl get snapshot "$snapshotRef" -ojson | jq -r '.spec.components[].containerImage')
+        # Loop through all components
+        for image in $components; do
+          # Check if image is empty and exit if it is
+          if [ -z "$image" ]; then
+              echo "No image found in snapshot: $snapshotRef"
+              exit 1
+          fi
+
+          echo "snapshot: $snapshotRef"
+          echo "image: $image"
+
+          vcs_ref=$(kubectl image info "$image" | grep vcs-ref | awk -F'=' '{print $2}' | tr -d ' ')
+          repo_url=$(kubectl image info "$image" | grep url | awk -F'=' '{print $2}' | \
+            sed 's|https://github.com/||' | sed 's|\.git$||' | tr -d ' ')
+
+          echo "vcs_ref: $vcs_ref"
+          echo "repo_url: $repo_url"
+
+          title=$(gh api repos/"$repo_url"/commits/"$vcs_ref"/pulls | jq -r '.[0] | "\(.title)"')
+
+          issue=$(echo "$title" | grep -o -E "$jira_project_regex")
+
+          # Check if issue is empty and exit if it is
+          if [ -z "$issue" ]; then
+              echo "No issue found in PR title: $title"
+              exit 0
+          fi
+
+          echo "repo_url: $repo_url"
+          echo "vcs_ref: $vcs_ref"
+          echo "title: $title"
+          echo "issue: $issue"
+          echo "server: $server"
+
+          CURL_ARGS=(
+              -H "Authorization: Bearer $JIRA_ACCESS_TOKEN"
+              --retry 3
+          )
+
+          API=$(jq -r '.[] | select(.servers[] | contains("'"$server"'")) | .api' <<< "$ISSUE_TRACKERS")
+          API_URL="https://$server/${API}/$issue"
+
+          # Get current status once to avoid multiple API calls
+          current_status=$(curl-with-retry "${CURL_ARGS[@]}" "${API_URL}" | jq -r '.fields.status.name')
+
+          if [ "$current_status" == "$target_state" ]; then
+              echo "Issue $issue is already in $target_state state. Skipping it."
+              exit 0
+          fi
+
+          # Check if current status matches any skip state
+          IFS=',' read -ra skip_states_array <<< "$skip_states"
+          for state in "${skip_states_array[@]}"; do
+              # Trim whitespace from state
+              trimmed_state=$(echo "$state" | xargs)
+              echo "Debug: Comparing '$current_status' with '$trimmed_state'"
+              if [ "$current_status" == "$trimmed_state" ]; then
+                  echo "Issue $issue is in '$trimmed_state' state. Skipping it."
+                  exit 0
+              fi
+          done
+
+          echo "Updating issue $issue"
+          BUILD_COMMENT="Bug fix is available in snapshot: $snapshotRef"
+          STATUS_RC=0
+          # Get the target state transition id. This varies per Jira project
+          if ! STATUS_ID="$(curl-with-retry "${CURL_ARGS[@]}" "${API_URL}/transitions" \
+              | jq -er '.transitions[] | select(.name=="'"$target_state"'") | .id')"; then
+              echo "Warning: failed to fetch the $target_state state id for issue $issue." \
+                  "We most likely do not have permission to update it."
+              STATUS_RC=1
+          fi
+          # Update the issue with staging build
+          if [ "$STATUS_RC" -ne 1 ] ; then
+              # Transition status
+              if ! curl-with-retry "${CURL_ARGS[@]}" -XPOST --data \
+              '{"transition":{"id":"'"$STATUS_ID"'"}}' \
+              -H "Content-Type: application/json" "${API_URL}/transitions"; then
+              echo "Warning: failed to update issue $issue. Will still try to add a comment."
+              fi
+              # Try to add the comment even if updating failed
+              if ! curl-with-retry "${CURL_ARGS[@]}" -XPOST --data \
+                  '{"body":"'"$BUILD_COMMENT"'"}' \
+                  -H "Content-Type: application/json" "${API_URL}/comment"; then
+                  echo "Warning: failed to add comment to issue $issue."
+              fi
+          fi
+        done
