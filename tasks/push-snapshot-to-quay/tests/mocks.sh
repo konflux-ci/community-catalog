@@ -30,6 +30,7 @@ function kubectl() {
     fi
 
     EXTRA_COMPONENTS=""
+    GIT_SOURCE=""
     if [[ "$3" == "multiple" ]]; then
       EXTRA_COMPONENTS=',
       {
@@ -43,6 +44,13 @@ function kubectl() {
       {
         "containerImage": "quay.io/valid-repo2:skip-image",
         "name": "test-image4"
+      }'
+    elif [[ "$3" == "templated" ]]; then
+      GIT_SOURCE=',
+      "source": {
+        "git": {
+          "revision": "abcdef1234567890abcdef1234567890abcdef12"
+        }
       }'
     fi
 
@@ -77,7 +85,7 @@ EOF
           "components": [
             {
               "containerImage": "$TEST_IMAGE",
-              "name": "test-image"
+              "name": "test-image"$GIT_SOURCE
             }$EXTRA_COMPONENTS
           ]
         }
@@ -100,6 +108,8 @@ EOF
     fi
 
     EXTRA_COMPONENT_DESTINATIONS=""
+    DEFAULTS_SECTION=""
+    COMPONENT_TAGS='["testtag"]'
     if [[ "$3" == "multiple" ]]; then
       EXTRA_COMPONENT_DESTINATIONS=',
       {
@@ -125,6 +135,24 @@ EOF
           "testtag"
         ]
       }'
+    elif [[ "$3" == "templated" ]]; then
+      EXTRA_COMPONENT_DESTINATIONS=''
+      COMPONENT_TAGS='[
+        "{{ git_sha }}",
+        "{{ timestamp }}",
+        "{{ release_timestamp }}",
+        "{{ labels.mylabel }}",
+        "{{ incrementer }}",
+        "v1.0.0-{{ git_short_sha }}"
+      ]'
+      DEFAULTS_SECTION=',
+      "defaults": {
+        "tags": [
+          "{{ git_short_sha }}",
+          "latest"
+        ],
+        "timestampFormat": "%Y%m%d"
+      }'
     fi
 
     cat > /tmp/mock-releaseplan.json <<EOF
@@ -143,11 +171,9 @@ EOF
               {
                 "name": "test-image",
                 "repository": "$TEST_REPO",
-                "tags": [
-                  "testtag"
-                ]
+                "tags": $COMPONENT_TAGS
               }$EXTRA_COMPONENT_DESTINATIONS
-            ]
+            ]$DEFAULTS_SECTION
           }
         }
       }
@@ -235,6 +261,61 @@ EOF
     fi
   fi
 
+}
+
+function get-image-architectures() {
+  cat <<EOF
+[
+  {
+    "platform": {
+      "architecture": "amd64",
+      "os": "linux"
+    }
+  }
+]
+EOF
+}
+
+function skopeo() {
+  if [[ "$*" == *"list-tags"* ]]; then
+    cat <<EOF
+{
+  "Repository": "quay.io/default-repo2",
+  "Tags": [
+    "testtag-1",
+    "testtag-2",
+    "latest"
+  ]
+}
+EOF
+  elif [[ "$*" == *"inspect"* ]]; then
+    cat <<EOF
+{
+  "Name": "quay.io/valid-repo:tag",
+  "Created": "2023-01-01T00:00:00Z",
+  "Labels": {
+    "build-date": "2023-01-01T00:00:00Z",
+    "mylabel": "myvalue"
+  }
+}
+EOF
+  else
+    echo Mock skopeo called with: $*
+    echo Error: Unexpected call
+    exit 1
+  fi
+}
+
+function date() {
+  if [[ "$*" == *"+%Y%m%d %T"* ]]; then
+    echo "20230101 00:00:00"
+  elif [[ "$*" == *"+%Y%m%d"* ]]; then
+    echo "20230101"
+  elif [[ "$*" == *"+%s"* ]]; then
+    echo "1672531200"
+  else
+    command date "$@"
+  fi
 }
 
 function oras() {

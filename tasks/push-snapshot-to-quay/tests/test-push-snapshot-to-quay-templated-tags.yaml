@@ -1,0 +1,20 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-quay-templated-tags
+spec:
+  description: Test templated tags
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-quay
+      params:
+        - name: releasePlan
+          value: "ns/templated"
+        - name: snapshot
+          value: "ns/templated"
+        - name: release
+          value: "ns/snapshot-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"
