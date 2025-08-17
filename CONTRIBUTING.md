@@ -287,7 +287,7 @@ Once you have everything ready, you can run the test script and pass task versio
 as arguments, e.g.
 
 ```
-./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping
+./.github/scripts/test_tekton_tasks.sh tasks/check-if-related-test
 ```
 
 This will install the task and run all test pipelines matching `tests/test*.yaml`.
@@ -295,7 +295,7 @@ This will install the task and run all test pipelines matching `tests/test*.yaml
 Another option is to run one or more tests directly:
 
 ```
-./.github/scripts/test_tekton_tasks.sh tasks/apply-mapping/tests/test-apply-mapping.yaml
+./.github/scripts/test_tekton_tasks.sh tasks/check-if-related-test/tests/test-check-if-related-test.yaml
 ```
 
 This will still install the task and run `pre-apply-task-hook.sh` if present, but it will then
