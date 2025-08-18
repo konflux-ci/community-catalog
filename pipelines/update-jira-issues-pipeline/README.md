@@ -12,10 +12,11 @@ The pipeline uses the `update-jira-issues` task to perform the actual JIRA updat
 
 | Name                    | Description                                                                                    | Optional | Default value                                         |
 |-------------------------|------------------------------------------------------------------------------------------------|----------|-------------------------------------------------------|
-
+| release                 | The namespaced name (namespace/name) of the Release custom resource initiating this pipeline execution | No       | -                                                     |
+| releasePlan             | The namespaced name (namespace/name) of the releasePlan                                       | No       | -                                                     |
 | snapshot                | The namespaced name (namespace/name) of the snapshot                                          | No       | -                                                     |
 | taskGitUrl              | The url to the git repo where the community-catalog tasks to be used are stored              | Yes      | https://github.com/konflux-ci/community-catalog.git  |
-| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                | Yes      | main                                                  |
+| taskGitRevision         | The revision in the taskGitUrl repo to be used                                                | Yes      | development                                          |
 | jira_server             | The server of the Jira instance to update issues on                                           | Yes      | issues.redhat.com                                     |
 | jira_project_regex      | The regex to match the Jira project to update issues on                                       | Yes      | "OCPBUGS-[0-9]+"                                      |
 | jira_target_state       | The target Jira state to transition issues to                                               | Yes      | "ON_QA"                                               |
