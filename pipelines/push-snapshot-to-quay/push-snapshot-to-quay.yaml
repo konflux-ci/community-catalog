@@ -34,6 +34,10 @@ spec:
       description: Only push if the managed release status is successful
       type: string
       default: "false"
+    - name: skipAttestations
+      description: If true, skip copying attestations and signatures
+      type: string
+      default: "false"
   tasks:
     - name: push-snapshot-to-quay
       taskRef:
@@ -54,3 +58,5 @@ spec:
           value: $(params.release)
         - name: requireSuccessfulManagedRelease
           value: $(params.requireSuccessfulManagedRelease)
+        - name: skipAttestations
+          value: $(params.skipAttestations)

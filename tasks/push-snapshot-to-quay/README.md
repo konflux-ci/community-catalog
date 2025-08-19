@@ -15,3 +15,4 @@ contains a status indicating that a managed pipeline has successfully completed.
 | releasePlan                     | Namespaced name of release plan - should be in format "namespace/name" | No       | -             |
 | requireSuccessfulManagedRelease | Only push if the managed release status is successful                  | No       | -             |
 | snapshot                        | Namespaced name of snapshot - should be in format "namespace/name"     | No       | -             |
+| skipAttestations                | If true, skip copying attestations and signatures                      | Yes      | False         |

@@ -18,9 +18,20 @@ function cosign() {
   fi
 }
 
-function kubectl() {
-  if [[ "$*" == *"snapshot"* ]]
+function skopeo() {
+  # Mock skopeo for testing copyAllAttestations=false
+  if [[ "$*" == "copy --all docker://"* ]]
   then
+    echo "Skopeo copy executed (no attestations)"
+    return 0
+  fi
+  
+  echo "Error: Unexpected skopeo call: $*"
+  exit 1
+}
+
+function kubectl() {
+  if [[ "$*" == *"snapshot"* ]]; then
     if [[ "$3" == "nopermission" ]]; then
       TEST_IMAGE="quay.io/no-permission:tag"
     elif [[ "$3" == "skip-image" ]]; then
