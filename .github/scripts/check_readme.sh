@@ -11,6 +11,7 @@
 CLI_README_ITEMS=()
 FAILED_ITEMS=()
 FAILED_PARAMS=()
+PYTHON_ONLY_FLAG=""
 
 show_help() {
   echo "Usage: $0 [item1] [item2] [...]"
@@ -68,6 +69,14 @@ do
   fi
 done
 
+# Checking which yq is being used - Python version requires -r flag
+if [[ "$(yq --version)" != *mikefarah* ]]; then
+  echo "Using Python version of yq"
+  PYTHON_ONLY_FLAG="-r"
+else
+  echo "Using Go version of yq"
+fi
+
 for ITEM in "${README_ITEMS[@]}"
 do
   echo "Task/Pipeline item: $ITEM"
@@ -81,19 +90,19 @@ do
     exit 1
   fi
 
-  if [[ $(yq ".spec | has(\"description\")" "$ITEM_PATH") == "false" ]]; then
+  if [[ $(yq $PYTHON_ONLY_FLAG ".spec | has(\"description\")" "$ITEM_PATH") == "false" ]]; then
     echo "  Error in $ITEM: Field '.spec.description' is missing in task"
     FAILED_ITEMS+=("$ITEM - no description")
   fi
 
   # Check description doesn't have '.' or ','
-  PARAMS=$(yq .spec.params "$ITEM_PATH")
-  for ((i=0; i < $(yq length <<< "$PARAMS"); i++)); do
+  PARAMS=$(yq $PYTHON_ONLY_FLAG .spec.params "$ITEM_PATH")
+  for ((i=0; i < $(yq $PYTHON_ONLY_FLAG length <<< "$PARAMS"); i++)); do
     # Get rid of newlines and remove trailing whitespace
-    DESCRIPTION="$(yq .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
-    NAME="$(yq .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    DESCRIPTION="$(yq $PYTHON_ONLY_FLAG .[$i].description <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
+    NAME="$(yq $PYTHON_ONLY_FLAG .[$i].name <<< "$PARAMS" | tr '\n' ' ' | sed 's/[[:space:]]*$//')"
 
-    if [[ $(yq ".[$i] | has(\"description\")" <<< "$PARAMS") == "false" ]]; then
+    if [[ $(yq $PYTHON_ONLY_FLAG ".[$i] | has(\"description\")" <<< "$PARAMS") == "false" ]]; then
       echo "  Error in $ITEM: Field '.param.[$i].description' ($NAME) is missing in task"
       FAILED_PARAMS+=("$ITEM_PATH: $NAME - missing description")
     elif [[ "${DESCRIPTION: -1}" =~ [.,] ]]; then
@@ -154,7 +163,7 @@ else
       "following command to fix this:"
   fi
   # Get unique items in array
-  FAILED_ITEMS=($(printf "%s\n" "${FAILED_ITEMS[@]% - *}" | sort -u ))
+  FAILED_ITEMS=("$(printf "%s\n" "${FAILED_ITEMS[@]% - *}" | sort -u )")
   echo "./.github/scripts/readme_generator.sh" "${FAILED_ITEMS[@]}"
   exit 1
 fi
