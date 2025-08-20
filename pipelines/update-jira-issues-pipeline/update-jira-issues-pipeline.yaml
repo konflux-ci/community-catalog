@@ -67,8 +67,6 @@ spec:
         - name: taskGitRevision
           value: $(params.taskGitRevision)
         - name: snapshot
-          type: string
-          description: The namespaced name (namespace/name) of the snapshot
           value: $(params.snapshot)
         - name: jira_server
           value: $(params.jira_server)
