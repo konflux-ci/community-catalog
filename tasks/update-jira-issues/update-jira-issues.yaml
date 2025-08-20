@@ -34,9 +34,6 @@ spec:
       type: string
       description: The Jira states that should be skipped
       default: "Verified,Release Pending,Closed"
-  workspaces:
-    - name: data
-      description: The workspace where the snapshot spec json file resides
   steps:
     - name: update-issues
       image: quay.io/konflux-ci/release-service-utils:b7f90a1dde20efe9a4063c1082c4f0ce31113bb1
