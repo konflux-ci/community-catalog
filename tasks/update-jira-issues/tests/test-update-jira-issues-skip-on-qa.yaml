@@ -23,6 +23,3 @@ spec:
           value: "OCPBUGS-[0-9]+"
         - name: jira_target_state
           value: "ON_QA"
-      workspaces:
-        - name: data
-          workspace: tests-workspace
