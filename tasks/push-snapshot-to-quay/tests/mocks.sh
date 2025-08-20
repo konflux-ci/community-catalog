@@ -73,6 +73,38 @@ function kubectl() {
         }
       }
 EOF
+    elif [[ "$3" == "single-component-mode" ]]; then
+      # This snapshot contains image references that are purposely invalid. If single component
+      # mode is working as expected, they will be removed from the snapshot. Otherwise, they will
+      # cause a push failure and thus failing the test.
+      cat > /tmp/mock-snapshot.json <<EOF
+      {
+        "apiVersion": "appstudio.redhat.com/v1alpha1",
+        "kind": "Snapshot",
+        "metadata": {
+          "name": "snapshot",
+          "namespace": "ns2",
+          "labels": {
+            "appstudio.openshift.io/component": "test-image",
+            "test.appstudio.openshift.io/type": "component"
+          }
+        },
+        "spec": {
+          "application": "demo",
+          "artifacts": {},
+          "components": [
+            {
+              "containerImage": "$TEST_IMAGE",
+              "name": "test-image"
+            },
+            {
+              "containerImage": "this-is-not-a-valid-image-ref",
+              "name": "test-image2"
+            }
+          ]
+        }
+      }
+EOF
     else
       cat > /tmp/mock-snapshot.json <<EOF
       {
