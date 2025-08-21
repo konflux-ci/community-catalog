@@ -76,7 +76,7 @@ spec:
         target_state=$(params.jira_target_state)
         skip_states="$(params.jira_skip_states)"
 
-        components=$(kubectl get snapshot "$snapshotRef" -ojson | jq -r '.spec.components[].containerImage')
+        components=$(kubectl get "$snapshotRef" -ojson | jq -r '.spec.components[].containerImage')
         # Loop through all components
         for image in $components; do
           # Check if image is empty and exit if it is
