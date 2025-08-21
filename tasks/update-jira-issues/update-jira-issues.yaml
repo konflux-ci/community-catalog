@@ -34,9 +34,6 @@ spec:
       type: string
       description: The Jira states that should be skipped
       default: "Verified,Release Pending,Closed"
-  workspaces:
-    - name: data
-      description: The workspace where the snapshot spec json file resides
   steps:
     - name: update-issues
       image: quay.io/konflux-ci/release-service-utils:b7f90a1dde20efe9a4063c1082c4f0ce31113bb1
@@ -143,7 +140,7 @@ spec:
           done
 
           echo "Updating issue $issue"
-          BUILD_COMMENT="Bug fix is available in snapshot: $snapshotRef"
+          BUILD_COMMENT="Bug fix is available in snapshot: $snapshotRef, build: $image"
           STATUS_RC=0
           # Get the target state transition id. This varies per Jira project
           if ! STATUS_ID="$(curl-with-retry "${CURL_ARGS[@]}" "${API_URL}/transitions" \

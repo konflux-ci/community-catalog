@@ -47,9 +47,6 @@ spec:
       type: string
       description: The Jira states that should be skipped
       default: "Verified,Release Pending,Closed"
-  workspaces:
-    - name: data
-      description: The workspace where the snapshot spec json file resides
   tasks:
     - name: update-jira-issues
       taskRef:
@@ -76,6 +73,3 @@ spec:
           value: $(params.jira_target_state)
         - name: jira_skip_states
           value: $(params.jira_skip_states)
-      workspaces:
-        - name: data
-          workspace: release-workspace
