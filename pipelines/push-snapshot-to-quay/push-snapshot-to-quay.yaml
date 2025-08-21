@@ -13,10 +13,6 @@ spec:
     
     If `requireSuccessfulManagedRelease` is "true", the snapshot will only be pushed if it
     contains a status indicating that a managed pipeline has successfully completed.
-
-    ⚠️ Note: This is a sample pipeline that should be kept simple to serve as a good example
-    of how to construct a tenant or final pipeline, so any non-bugfix contributions should be moved
-    to a new or existing duplicate of this pipeline.
   params:
     - name: releasePlan
       description: Namespaced name of release plan - should be in format "namespace/name"

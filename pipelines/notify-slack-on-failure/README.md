@@ -2,10 +2,6 @@
 
 Sends an error message to Slack using postMessage API if managed pipelines fail.
 
-⚠️ Note: This is a sample pipeline that should be kept simple to serve as a good example
-of how to construct a tenant or final pipeline, so any non-bugfix contributions should be moved
-to a new or existing duplicate of this pipeline.
-
 ## Parameters
 
 | Name            | Description                                                                     | Optional | Default value                                       |

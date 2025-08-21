@@ -2,23 +2,24 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: notify-slack-on-failure
+  name: sample-pipeline
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
 spec:
   description: |-
-    Sends an error message to Slack using postMessage API if managed pipelines fail.
+    Sample pipeline that demonstrates how to use the sample-task to retrieve and print Release and ReleasePlan CRs.
+
+    ⚠️ Note: This is a sample pipeline that should be kept simple to serve as a good example
+    of how to construct a tenant task, so any non-bugfix contributions should be moved
+    to a new or existing duplicate of this pipeline.
   params:
-    - name: secretName
-      type: string
-      description: Name of secret which contains authentication token for app
-    - name: secretKeyName
-      type: string
-      description: Name of key within secret which contains webhook URL
     - name: release
       type: string
       description: Namespaced name of release - should be in format "namespace/name"
+    - name: releasePlan
+      type: string
+      description: Namespaced name of release plan - should be in format "namespace/name"
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the community-catalog tasks to be used are stored
@@ -27,7 +28,7 @@ spec:
       type: string
       description: The revision in the taskGitUrl repo to be used
   tasks:
-    - name: notify-slack-on-failure
+    - name: sample-task
       taskRef:
         resolver: "git"
         params:
@@ -36,11 +37,9 @@ spec:
           - name: revision
             value: $(params.taskGitRevision)
           - name: pathInRepo
-            value: tasks/notify-slack-on-failure/notify-slack-on-failure.yaml
+            value: tasks/sample-task/sample-task.yaml
       params:
-        - name: secretName
-          value: $(params.secretName)
-        - name: secretKeyName
-          value: $(params.secretKeyName)
         - name: release
           value: $(params.release)
+        - name: releasePlan
+          value: $(params.releasePlan)
