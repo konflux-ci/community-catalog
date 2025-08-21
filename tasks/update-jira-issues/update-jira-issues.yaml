@@ -76,7 +76,10 @@ spec:
         target_state=$(params.jira_target_state)
         skip_states="$(params.jira_skip_states)"
 
-        components=$(kubectl get "$snapshotRef" -ojson | jq -r '.spec.components[].containerImage')
+        # Extract snapshot name from namespace/name format
+        snapshotName="${snapshotRef##*/}"
+
+        components=$(kubectl get snapshot "$snapshotName" -ojson | jq -r '.spec.components[].containerImage')
         # Loop through all components
         for image in $components; do
           # Check if image is empty and exit if it is
@@ -85,7 +88,7 @@ spec:
               exit 1
           fi
 
-          echo "snapshot: $snapshotRef"
+          echo "snapshot: $snapshotName"
           echo "image: $image"
 
           vcs_ref=$(kubectl image info "$image" | grep vcs-ref | awk -F'=' '{print $2}' | tr -d ' ')
@@ -140,7 +143,7 @@ spec:
           done
 
           echo "Updating issue $issue"
-          BUILD_COMMENT="Bug fix is available in snapshot: $snapshotRef, build: $image"
+          BUILD_COMMENT="Bug fix is available in snapshot: $snapshotName, build: $image"
           STATUS_RC=0
           # Get the target state transition id. This varies per Jira project
           if ! STATUS_ID="$(curl-with-retry "${CURL_ARGS[@]}" "${API_URL}/transitions" \
