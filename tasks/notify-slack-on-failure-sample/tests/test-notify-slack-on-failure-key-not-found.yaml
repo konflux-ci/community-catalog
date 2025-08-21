@@ -12,7 +12,7 @@ spec:
   tasks:
     - name: run-task
       taskRef:
-        name: notify-slack-on-failure
+        name: notify-slack-on-failure-sample
       params:
         - name: secretName
           value: "my-secret"

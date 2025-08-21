@@ -2,7 +2,7 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: notify-slack-on-failure
+  name: notify-slack-on-failure-sample
 spec:
   description: |-
     Sends an error message to Slack using postMessage API if managed pipelines fail.

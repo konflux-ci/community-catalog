@@ -10,7 +10,7 @@ spec:
   tasks:
     - name: run-task
       taskRef:
-        name: push-snapshot-to-quay
+        name: push-snapshot-to-quay-sample
       params:
         - name: releasePlan
           value: "ns/multiple"

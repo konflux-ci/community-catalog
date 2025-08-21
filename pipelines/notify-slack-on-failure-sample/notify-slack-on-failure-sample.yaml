@@ -2,7 +2,7 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: notify-slack-on-failure
+  name: notify-slack-on-failure-sample
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: release
@@ -31,7 +31,7 @@ spec:
       type: string
       description: The revision in the taskGitUrl repo to be used
   tasks:
-    - name: notify-slack-on-failure
+    - name: notify-slack-on-failure-sample
       taskRef:
         resolver: "git"
         params:
@@ -40,7 +40,7 @@ spec:
           - name: revision
             value: $(params.taskGitRevision)
           - name: pathInRepo
-            value: tasks/notify-slack-on-failure/notify-slack-on-failure.yaml
+            value: tasks/notify-slack-on-failure-sample/notify-slack-on-failure-sample.yaml
       params:
         - name: secretName
           value: $(params.secretName)

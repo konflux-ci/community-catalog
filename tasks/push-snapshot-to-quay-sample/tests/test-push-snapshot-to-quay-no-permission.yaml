@@ -2,23 +2,23 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-push-snapshot-to-quay-no-components
+  name: test-push-snapshot-to-quay-no-permission
   annotations:
     test/assert-task-failure: "run-task"
 spec:
   description: |
-    Run the push-snapshot-to-quay task and check that the task 
-    fails when there are no components present in the snapshot
+    Run the push-snapshot-to-quay task without credentials to access a repository
+    and check that the task fails
   tasks:
     - name: run-task
       taskRef:
-        name: push-snapshot-to-quay
+        name: push-snapshot-to-quay-sample
       params:
         - name: releasePlan
           value: "ns/releasePlan"
         - name: snapshot
-          value: "ns/empty"
+          value: "ns/nopermission"
         - name: release
-          value: "ns/empty-release"
+          value: "ns/nopermission-release"
         - name: requireSuccessfulManagedRelease
           value: "false"

@@ -1,4 +1,4 @@
-# notify-slack-on-failure
+# notify-slack-on-failure-sample
 
 Sends an error message to Slack using postMessage API if managed pipelines fail.
 

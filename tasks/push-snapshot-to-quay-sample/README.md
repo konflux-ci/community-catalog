@@ -1,4 +1,4 @@
-# push-snapshot-to-quay
+# push-snapshot-to-quay-sample
 
 Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
 each image is taken from the '.spec.data.mapping' section of the release plan, in the form

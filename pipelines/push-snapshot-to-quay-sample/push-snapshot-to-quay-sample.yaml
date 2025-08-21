@@ -2,7 +2,7 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: push-snapshot-to-quay
+  name: push-snapshot-to-quay-sample
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
 spec:
@@ -43,7 +43,7 @@ spec:
       type: string
       default: "false"
   tasks:
-    - name: push-snapshot-to-quay
+    - name: push-snapshot-to-quay-sample
       taskRef:
         resolver: "git"
         params:
@@ -52,7 +52,7 @@ spec:
           - name: revision
             value: $(params.taskGitRevision)
           - name: pathInRepo
-            value: tasks/push-snapshot-to-quay/push-snapshot-to-quay.yaml
+            value: tasks/push-snapshot-to-quay-sample/push-snapshot-to-quay-sample.yaml
       params:
         - name: snapshot
           value: $(params.snapshot)
