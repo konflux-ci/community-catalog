@@ -31,9 +31,9 @@ The pipeline uses the `update-jira-issues` task to perform the actual JIRA updat
 ## Prerequisites
 
 - A secret named `konflux-jira-secret` containing a `token` key with a valid Jira access token
+- A secret named `konflux-github-secret` containing a `token` key with a valid Github access token
 - The snapshot must contain at least one component with a container image
 - The container image must have `vcs-ref` and `url` labels pointing to a valid Git repository
-- GitHub CLI (`gh`) must be available and configured for API access
 
 ## How it works
 
