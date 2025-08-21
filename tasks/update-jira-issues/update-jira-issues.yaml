@@ -37,17 +37,16 @@ spec:
   steps:
     - name: update-issues
       image: quay.io/konflux-ci/release-service-utils:b7f90a1dde20efe9a4063c1082c4f0ce31113bb1
-      computeResources:
-        limits:
-          memory: 32Mi
-        requests:
-          memory: 32Mi
-          cpu: 50m
       env:
         - name: JIRA_ACCESS_TOKEN
           valueFrom:
             secretKeyRef:
               name: konflux-jira-secret
+              key: token
+        - name: GITHUB_ACCESS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: konflux-github-secret
               key: token
       script: |
         #!/usr/bin/env bash
@@ -79,6 +78,9 @@ spec:
         # Extract snapshot name from namespace/name format
         snapshotName="${snapshotRef##*/}"
 
+        echo "logging in to github"
+        gh auth login --with-token <<< "$GITHUB_ACCESS_TOKEN" || true
+
         components=$(kubectl get snapshot "$snapshotName" -ojson | jq -r '.spec.components[].containerImage')
         # Loop through all components
         for image in $components; do
@@ -91,16 +93,16 @@ spec:
           echo "snapshot: $snapshotName"
           echo "image: $image"
 
-          vcs_ref=$(kubectl image info "$image" | grep vcs-ref | awk -F'=' '{print $2}' | tr -d ' ')
-          repo_url=$(kubectl image info "$image" | grep url | awk -F'=' '{print $2}' | \
-            sed 's|https://github.com/||' | sed 's|\.git$||' | tr -d ' ')
+          vcs_ref=$(skopeo inspect docker://"$image" | jq -r '.Labels["vcs-ref"]')
+          repo_url=$(skopeo inspect docker://"$image" | jq -r '.Labels["url"]' | \
+          sed 's|https://github.com/||' | sed 's|\.git$||' | tr -d ' ')
 
           echo "vcs_ref: $vcs_ref"
           echo "repo_url: $repo_url"
 
           title=$(gh api repos/"$repo_url"/commits/"$vcs_ref"/pulls | jq -r '.[0] | "\(.title)"')
 
-          issue=$(echo "$title" | grep -o -E "$jira_project_regex")
+          issue=$(echo "$title" | grep -o -E "$jira_project_regex" || true)
 
           # Check if issue is empty and exit if it is
           if [ -z "$issue" ]; then
@@ -108,8 +110,6 @@ spec:
               exit 0
           fi
 
-          echo "repo_url: $repo_url"
-          echo "vcs_ref: $vcs_ref"
           echo "title: $title"
           echo "issue: $issue"
           echo "server: $server"

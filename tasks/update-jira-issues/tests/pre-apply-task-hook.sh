@@ -10,3 +10,7 @@ yq -i '.spec.steps[0].script = load_str("'$SCRIPT_DIR'/mocks.sh") + .spec.steps[
 # Create a dummy jira secret (and delete it first if it exists)
 kubectl delete secret konflux-jira-secret --ignore-not-found
 kubectl create secret generic konflux-jira-secret --from-literal=token=dummy-token
+
+# Create a dummy github secret (and delete it first if it exists)
+kubectl delete secret konflux-github-secret --ignore-not-found
+kubectl create secret generic konflux-github-secret --from-literal=token=dummy-token

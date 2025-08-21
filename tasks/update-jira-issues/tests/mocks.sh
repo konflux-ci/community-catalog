@@ -10,7 +10,7 @@ set -eux
 
 function kubectl() {
   # Don't echo debug output to avoid interfering with the actual return value
-  echo $* >> /tmp/mock_oc.txt
+  echo $* >> /tmp/mock_kubectl.txt
 
   if [[ "$*" == *"get snapshot"* ]]; then
     # Mock snapshot response for default/konflux-test-container-98765
@@ -26,15 +26,29 @@ function kubectl() {
 }
 EOF
     cat /tmp/mock_snapshot.json
-  elif [[ "$*" == *"image info"* ]]; then
-    # Mock image info response
-    cat > /tmp/mock_image_info.txt <<EOF
-vcs-ref=abc123def456
-url=https://github.com/example/konflux-test-container.git
-EOF
-    cat /tmp/mock_image_info.txt
   else
-    echo Error: Unexpected oc call: $*
+    echo Error: Unexpected kubectl call: $*
+    exit 1
+  fi
+}
+
+function skopeo() {
+  # Don't echo debug output to avoid interfering with the actual return value
+  echo $* >> /tmp/mock_skopeo.txt
+
+  if [[ "$*" == *"inspect docker://"* ]]; then
+    # Mock skopeo inspect response with the required labels for any image
+    cat > /tmp/mock_skopeo_inspect.json <<EOF
+{
+  "Labels": {
+    "vcs-ref": "abc123def456",
+    "url": "https://github.com/example/konflux-test-container.git"
+  }
+}
+EOF
+    cat /tmp/mock_skopeo_inspect.json
+  else
+    echo Error: Unexpected skopeo call: $*
     exit 1
   fi
 }
@@ -47,6 +61,10 @@ function jq() {
     echo "quay.io/example/konflux-test-container:latest"
   elif [[ "$*" == *".spec.components[].containerImage"* ]]; then
     echo "quay.io/example/konflux-test-container:latest"
+  elif [[ "$*" == *".Labels[\"vcs-ref\"]"* ]]; then
+    echo "abc123def456"
+  elif [[ "$*" == *".Labels[\"url\"]"* ]]; then
+    echo "https://github.com/example/konflux-test-container.git"
   elif [[ "$*" == *".transitions[] | select(.name==\"ON_QA\") | .id"* ]]; then
     echo "123"
   elif [[ "$*" == *".fields.status.name"* ]]; then
@@ -69,7 +87,11 @@ function gh() {
   # Don't echo debug output to avoid interfering with the actual return value
   echo $* >> /tmp/mock_gh.txt
 
-  if [[ "$*" == *"api repos"* ]]; then
+  if [[ "$*" == *"auth login --with-token"* ]]; then
+    # Mock GitHub auth login - just return success
+    echo "✓ Logged in to github.com (oauth_token)"
+    return 0
+  elif [[ "$*" == *"api repos"* ]]; then
     # Mock GitHub API response for pull request
     cat > /tmp/mock_gh_response.json <<EOF
 [
