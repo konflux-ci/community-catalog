@@ -1,0 +1,22 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-quay-single-component-mode-release-failed-no-require-success
+spec:
+  description: |
+    Run the push-snapshot-to-quay-single-component-mode task with a release param that refers to a failed release,
+    but do not require a successful release. The task should succeed (not block on failure).
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-quay-single-component-mode
+      params:
+        - name: releasePlan
+          value: "ns/releasePlan"
+        - name: snapshot
+          value: "ns/snapshot"
+        - name: release
+          value: "ns/fail"
+        - name: requireSuccessfulManagedRelease
+          value: "false"

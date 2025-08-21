@@ -2,15 +2,15 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-push-snapshot-to-quay-single-component-mode
+  name: test-push-snapshot-to-quay-single-component-mode-single-component-mode
 spec:
   description: |
-    Run the push-snapshot-to-quay task with single component mode
+    Run the push-snapshot-to-quay-single-component-mode task with single component mode
     and check that the task succeeds
   tasks:
     - name: run-task
       taskRef:
-        name: push-snapshot-to-quay
+        name: push-snapshot-to-quay-single-component-mode
       params:
         - name: releasePlan
           value: "ns/multiple"

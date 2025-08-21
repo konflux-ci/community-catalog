@@ -2,13 +2,13 @@
 apiVersion: tekton.dev/v1
 kind: Task
 metadata:
-  name: push-snapshot-to-quay
+  name: push-snapshot-to-quay-single-component-mode
 spec:
   description: |-
     Tekton task to push snapshot images to quay.io using `cosign copy`. The destination for
     each image is taken from the '.spec.data.mapping' section of the release plan, in the form
     '.spec.data.mapping.components.repository', and '.spec.data.mapping.components.tags'.
-    
+
     If `requireSuccessfulManagedRelease` is "true", the snapshot will only be pushed if it
     contains a status indicating that a managed pipeline has successfully completed.
 
@@ -32,6 +32,15 @@ spec:
       description: If true, skip copying attestations and signatures
       type: string
       default: "false"
+    - name: singleComponent
+      description: Single mode component enabled
+      type: string
+      default: "false"
+  stepTemplate:
+    env:
+      - name: HOME
+        value: /tekton/home
+    workingDir: /tekton/home
   steps:
     - name: check-release-status
       image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
@@ -60,6 +69,53 @@ spec:
         if [[ "$RELEASESTATUS" != *"Succeeded"* ]]; then
           echo "Release did not succeed, stopping snapshot push"
           exit 1
+        fi
+    - name: reduce
+      image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
+      env:
+        - name: SNAPSHOT_REF
+          value: $(params.snapshot)
+        - name: SINGLE_COMPONENT
+          value: $(params.singleComponent)
+      script: |
+        #!/usr/bin/env bash
+        set -eux
+
+        IFS='/' read -r "SNAPSHOT_NAMESPACE" "SNAPSHOT_NAME" <<< "${SNAPSHOT_REF}"
+        kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE" -o json > snapshot.json
+
+        < snapshot.json jq '.spec' > snapshot_spec_original.json
+
+        cp snapshot_spec_original.json snapshot_spec.json
+
+        echo "Single Component mode? ${SINGLE_COMPONENT}"
+        if [ "${SINGLE_COMPONENT}" == "true" ]; then
+
+          snapshot_type="$(
+            < snapshot.json jq -r '.metadata.labels."test.appstudio.openshift.io/type" // ""'
+          )"
+
+          snapshot_component="$(
+            < snapshot.json jq -r '.metadata.labels."appstudio.openshift.io/component" // ""'
+          )"
+
+          echo "Snapshot type: ${snapshot_type}"
+          echo "Snapshot component: ${snapshot_component}"
+          if [ "${snapshot_type}" == "component" ] && [ "${snapshot_component}" != "" ]; then
+            echo "Single Component mode is ${SINGLE_COMPONENT} and Snapshot type is component"
+
+            jq --arg component "${snapshot_component}" \
+            'del(.components[] | select(.name != $component))' snapshot_spec_original.json > snapshot_spec.json
+
+            ## make sure we still have 1 component
+            component_count=$(jq -r '[ .components[] ] | length' snapshot_spec.json)
+            echo "Component count: ${component_count}"
+            if [ "${component_count}" != "1" ] ; then
+              echo "Error: Reduced Snapshot has ${component_count} components. It should contain 1"
+              echo "       Verify that the Snapshot contains the built component: ${snapshot_component}"
+              exit 1
+            fi
+          fi
         fi
     - name: push-snapshot-to-quay
       image: quay.io/konflux-ci/release-service-utils:066a63d25546239e79533b99c83ff521a045c819
@@ -91,7 +147,7 @@ spec:
             export DOCKER_CONFIG
 
             # SC2128 - "Expanding an array without an index only gives the element in the index 0."
-            # is disabled because "$item" on the next line should only have one element, so there 
+            # is disabled because "$item" on the next line should only have one element, so there
             # is no need to get any index other than 0.
 
             # shellcheck disable=SC2128
@@ -111,9 +167,7 @@ spec:
 
         }
 
-        IFS='/' read -r "SNAPSHOT_NAMESPACE" "SNAPSHOT_NAME" <<< "$(params.snapshot)"
-        SNAPSHOT_SPEC=$(kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE" \
-          -o jsonpath='{.spec}')
+        SNAPSHOT_SPEC="$(< snapshot_spec.json jq '.')"
 
         IFS='/' read -r "RP_NAMESPACE" "RP_NAME" <<< "$(params.releasePlan)"
         RP_DATA=$(kubectl get releaseplan "$RP_NAME" -n "$RP_NAMESPACE" \
