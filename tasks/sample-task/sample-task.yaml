@@ -1,0 +1,78 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: sample-task
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: "release, sample"
+spec:
+  description: |-
+    Sample task that retrieves and prints Release and ReleasePlan CRs.
+    
+    This task demonstrates how to work with Release and ReleasePlan custom resources
+    in the Konflux CI environment.
+
+    ⚠️ Note: This is a sample task that should be kept simple to serve as a good example
+    of how to construct a tenant task, so any non-bugfix contributions should be moved
+    to a new or existing duplicate of this task.
+  params:
+    - name: release
+      type: string
+      description: Namespaced name of release - should be in format "namespace/name"
+    - name: releasePlan
+      type: string
+      description: Namespaced name of release plan - should be in format "namespace/name"
+    - name: snapshot
+      description: Namespaced name of snapshot - should be in format "namespace/name"
+      type: string
+  steps:
+    - name: get-and-print-crs
+      image: quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+      script: |
+        #!/usr/bin/env bash
+        set -euxo pipefail
+
+        echo "=== Sample Task: Getting Release, ReleasePlan, and Snapshot CRs ==="
+        
+        # Parse release namespace and name
+        IFS='/' read -r RELEASE_NAMESPACE RELEASE_NAME <<< "$(params.release)"
+        echo "Release: $RELEASE_NAMESPACE/$RELEASE_NAME"
+        
+        echo
+        echo "=== Release CR ==="
+        if kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE"; then
+            kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" -o yaml
+        else
+            echo "Failed to retrieve Release CR"
+            exit 1
+        fi
+        
+        # Parse release plan namespace and name
+        IFS='/' read -r RELEASEPLAN_NAMESPACE RELEASEPLAN_NAME <<< "$(params.releasePlan)"
+        echo "ReleasePlan: $RELEASEPLAN_NAMESPACE/$RELEASEPLAN_NAME"
+        
+        echo
+        echo "=== ReleasePlan CR ==="
+        if kubectl get releaseplan "$RELEASEPLAN_NAME" -n "$RELEASEPLAN_NAMESPACE"; then
+            kubectl get releaseplan "$RELEASEPLAN_NAME" -n "$RELEASEPLAN_NAMESPACE" -o yaml
+        else
+            echo "Failed to retrieve ReleasePlan CR"
+            exit 1
+        fi
+        
+        # Parse snapshot namespace and name
+        IFS='/' read -r SNAPSHOT_NAMESPACE SNAPSHOT_NAME <<< "$(params.snapshot)"
+        echo "Snapshot: $SNAPSHOT_NAMESPACE/$SNAPSHOT_NAME"
+        
+        echo
+        echo "=== Snapshot CR ==="
+        if kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE"; then
+            kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE" -o yaml
+        else
+            echo "Failed to retrieve Snapshot CR"
+            exit 1
+        fi
+        
+        echo
+        echo "=== Sample Task Completed Successfully ==="

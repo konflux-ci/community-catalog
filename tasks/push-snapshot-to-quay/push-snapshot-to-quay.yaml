@@ -11,10 +11,6 @@ spec:
     
     If `requireSuccessfulManagedRelease` is "true", the snapshot will only be pushed if it
     contains a status indicating that a managed pipeline has successfully completed.
-
-    ⚠️ Note: This is a sample task that should be kept simple to serve as a good example
-    of how to construct a tenant task, so any non-bugfix contributions should be moved
-    to a new or existing duplicate of this task.
   params:
     - name: release
       description: Namespaced name of release - should be in format "namespace/name"
