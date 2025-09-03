@@ -23,6 +23,21 @@ set -e
 ORG="konflux-ci"
 REPO="community-catalog"
 
+print_help() {
+    echo "Usage: $0 --promotion-type branch1-to-branch2 [--force-to-staging false] [--override false] [--dry-run false]"
+    echo
+    echo "  --promotion-type:   The type of promotion to perform. Either development-to-staging"
+    echo "                      or staging-to-production."
+    echo "  --force-to-staging: If passed with value true, allow promotion to staging even"
+    echo "                      if staging and production differ."
+    echo "  --override:         If passed with value true, allow promotion to production"
+    echo "                      even if the change has not been in staging for six days."
+    echo "  --dry-run:          If passed with value true, print out the changes that would"
+    echo "                      be promoted but do not git push or delete the temp repo."
+    echo
+    echo "  --promotion-type has to be specified."
+}
+
 OPTIONS=$(getopt --long "promotion-type:,force-to-staging:,override:,dry-run:,help" -o "p:,h" -- "$@")
 eval set -- "$OPTIONS"
 while true; do
@@ -61,21 +76,6 @@ cleanup() {
     cd -
     rm -rf "${1:?}"
   fi
-}
-
-print_help() {
-    echo "Usage: $0 --promotion-type branch1-to-branch2 [--force-to-staging false] [--override false] [--dry-run false]"
-    echo
-    echo "  --promotion-type:   The type of promotion to perform. Either development-to-staging"
-    echo "                      or staging-to-production."
-    echo "  --force-to-staging: If passed with value true, allow promotion to staging even"
-    echo "                      if staging and production differ."
-    echo "  --override:         If passed with value true, allow promotion to production"
-    echo "                      even if the change has not been in staging for six days."
-    echo "  --dry-run:          If passed with value true, print out the changes that would"
-    echo "                      be promoted but do not git push or delete the temp repo."
-    echo
-    echo "  --promotion-type has to be specified."
 }
 
 check_if_branch_differs() {
