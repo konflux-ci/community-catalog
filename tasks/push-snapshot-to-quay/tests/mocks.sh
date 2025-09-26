@@ -5,27 +5,78 @@ set -eux
 
 function cosign() {
   # mock cosign failing for the no-permission test
-  if [[ "$*" == "copy -f quay.io/no-permission:tag "*":"* ]]
+  if [[ "$1" == "copy" && "$2" == "-f" && "$3" == "quay.io/no-permission:tag" ]]
   then
     echo Invalid credentials for quay.io/no-permission:tag
     return 1
   fi
 
-  if [[ "$*" != "copy -f "*":"*" "*":"* ]]
+  # Accept valid cosign copy calls
+  if [[ "$1" == "copy" && "$2" == "-f" && "$3" == *":"* && "$4" == *":"* ]]
   then
-    echo Error: Unexpected call
-    exit 1
+    return 0
   fi
+
+  echo Error: Unexpected call
+  exit 1
 }
 
 function skopeo() {
   # Mock skopeo for testing copyAllAttestations=false
-  if [[ "$*" == "copy --all docker://"* ]]
+  if [[ "$1" == "copy" && "$2" == "--all" && "$3" == docker://* && "$4" == docker://* ]]
   then
     echo "Skopeo copy executed (no attestations)"
     return 0
   fi
-  
+
+  # Mock skopeo inspect - return metadata based on image
+  if [[ "$*" == *"inspect"* ]]; then
+    if [[ "$*" == *"templating-test"* ]]; then
+      # Return templating-specific metadata
+      cat <<EOF
+{
+  "Labels": {
+    "build-date": "2024-01-15T10:30:00Z",
+    "version": "1.2.3"
+  },
+  "Created": "2024-01-15T10:30:00Z"
+}
+EOF
+    else
+      # Return default metadata
+      cat <<EOF
+{
+  "Labels": {
+    "build-date": "2024-01-01T10:30:00Z",
+    "version": "1.0.0"
+  },
+  "Created": "2024-01-01T10:30:00Z"
+}
+EOF
+    fi
+    return 0
+  fi
+
+  # Mock skopeo list-tags - return tags based on repository
+  if [[ "$*" == *"list-tags"* ]]; then
+    if [[ "$*" == *"test-repo"* ]]; then
+      # Return tags for incrementer testing
+      cat <<EOF
+{
+  "Tags": ["release-1", "release-2", "release-5", "other-tag"]
+}
+EOF
+    else
+      # Return default tags
+      cat <<EOF
+{
+  "Tags": ["latest", "v1.0.0", "v1.1.0"]
+}
+EOF
+    fi
+    return 0
+  fi
+
   echo "Error: Unexpected skopeo call: $*"
   exit 1
 }
@@ -70,6 +121,32 @@ function kubectl() {
           "application": "demo",
           "artifacts": {},
           "components": []
+        }
+      }
+EOF
+    elif [[ "$3" == "templating" ]]; then
+      cat > /tmp/mock-snapshot.json <<EOF
+      {
+        "apiVersion": "appstudio.redhat.com/v1alpha1",
+        "kind": "Snapshot",
+        "metadata": {
+          "name": "snapshot",
+          "namespace": "ns2"
+        },
+        "spec": {
+          "application": "demo",
+          "artifacts": {},
+          "components": [
+            {
+              "containerImage": "quay.io/valid-repo:templating-test",
+              "name": "test-image",
+              "source": {
+                "git": {
+                  "revision": "abc123def456789012345678901234567890abcd"
+                }
+              }
+            }
+          ]
         }
       }
 EOF
@@ -136,6 +213,45 @@ EOF
           "testtag"
         ]
       }'
+    fi
+
+    if [[ "$3" == "templating" ]]; then
+      cat > /tmp/mock-releaseplan.json <<EOF
+    {
+      "apiVersion": "appstudio.redhat.com/v1alpha1",
+      "kind": "ReleasePlan",
+      "metadata": {
+        "name": "releaseplan",
+        "namespace": "ns2"
+      },
+      "spec": {
+        "application": "demo",
+        "data": {
+          "mapping": {
+            "components": [
+              {
+                "name": "test-image",
+                "repository": "quay.io/test-repo",
+                "tags": [
+                  "{{ git_short_sha }}",
+                  "v1.0-{{ timestamp }}",
+                  "build-{{ labels.version }}",
+                  "release-{{ incrementer }}"
+                ]
+              }
+            ]
+          }
+        }
+      }
+    }
+EOF
+
+      if [[ "$*" == *"jsonpath={.spec.data.mapping}"* ]]; then
+        cat /tmp/mock-releaseplan.json | jq .spec.data.mapping
+      else
+        cat /tmp/mock-releaseplan.json
+      fi
+      return
     fi
 
     cat > /tmp/mock-releaseplan.json <<EOF
@@ -248,18 +364,26 @@ EOF
 
 }
 
+function get-image-architectures() {
+  # Mock architecture data for templating tests
+  echo '[{"platform":{"os":"linux","architecture":"amd64"}}]'
+}
+
 function oras() {
-  if [[ "$*" == "resolve --registry-config "*" "* ]]; then
-    if [[ "$*" =~ "--platform" && "$4" =~ ".src" ]]; then
+  if [[ "$1" == "resolve" && "$2" == "--registry-config" ]]; then
+    # Check for platform + .src validation (image is in last argument)
+    if [[ "$*" =~ "--platform" && "${@: -1}" =~ ".src" ]]; then
       echo "Error: .src images should not use --platform" >&2
       exit 1
     fi
-    if [[ "$4" == *skip-image* ]]; then
+    # Image is the last argument
+    image="${@: -1}"
+    if [[ "$image" == *skip-image* ]]; then
       echo "sha256:111111"
     else
       # echo the shasum computed from the pull spec so the task knows if two images are the same
       echo -n "sha256:"
-      echo $4 | sha256sum | cut -d ' ' -f 1
+      echo "$image" | sha256sum | cut -d ' ' -f 1
     fi
     return
   else

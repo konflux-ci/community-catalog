@@ -11,6 +11,37 @@ contains a status indicating that a managed pipeline has successfully completed.
 of how to construct a tenant task, so any non-bugfix contributions should be moved
 to a new or existing duplicate of this task.
 
+## Tag Templating
+
+Supports variable expansion in tags:
+
+* `{{ timestamp }}` - build-date label from image (timestampFormat or %s)
+* `{{ release_timestamp }}` - current time (timestampFormat or %s)
+* `{{ git_sha }}` - git sha from snapshot
+* `{{ git_short_sha }}` - git sha (7 chars)
+* `{{ incrementer }}` - next sequential number (e.g. v1.0.0-2 → v1.0.0-3)
+* `{{ labels.mylabel }}` - image label value
+
+### Example
+
+```yaml
+spec:
+  data:
+    mapping:
+      defaults:
+        tags:
+          - "{{ git_short_sha }}"
+          - "latest"
+        timestampFormat: "%Y%m%d"
+      components:
+        - name: my-component
+          repository: quay.io/my-org/my-repo
+          tags:
+            - "2.9.0-{{ incrementer }}"
+            - "2.9.0-{{ timestamp }}"
+            - "2.9.0-{{ git_short_sha }}"
+```
+
 ## Parameters
 
 | Name                            | Description                                                            | Optional | Default value |

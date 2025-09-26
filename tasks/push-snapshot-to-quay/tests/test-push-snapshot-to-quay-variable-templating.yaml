@@ -1,0 +1,25 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-quay-variable-templating
+spec:
+  description: |
+    Test all variable templating functionality:
+    - {{ git_sha }} and {{ git_short_sha }}
+    - {{ timestamp }} and {{ release_timestamp }}
+    - {{ labels.* }}
+    - {{ incrementer }}
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-quay
+      params:
+        - name: releasePlan
+          value: "ns/templating"
+        - name: snapshot
+          value: "ns/templating"
+        - name: release
+          value: "ns/snapshot-release"
+        - name: requireSuccessfulManagedRelease
+          value: "false"
