@@ -8,11 +8,16 @@ function git() {
 
   if [[ "$*" == *"clone"* ]]; then
     gitRepo=$(awk '{print $NF}' <<< $*)
-    mkdir -p "$gitRepo"/internal-services/manager
+    mkdir -p "$gitRepo"/components/internal-services/internal-staging
     echo "image: quay.io/konflux-ci/internal-services:old" | tee \
-      "$gitRepo"/internal-services/manager/one.yaml \
-      "$gitRepo"/internal-services/manager/two.yaml \
-      "$gitRepo"/internal-services/manager/three.yaml
+      "$gitRepo"/components/internal-services/internal-staging/manager-one.yaml \
+      "$gitRepo"/components/internal-services/internal-staging/manager-two.yaml \
+      "$gitRepo"/components/internal-services/internal-staging/manager-three.yaml
+    mkdir -p "$gitRepo"/components/internal-services/internal-production
+    echo "image: quay.io/konflux-ci/internal-services:old" | tee \
+      "$gitRepo"/components/internal-services/internal-production/manager-one.yaml \
+      "$gitRepo"/components/internal-services/internal-production/manager-two.yaml \
+      "$gitRepo"/components/internal-services/internal-production/manager-three.yaml
   else
     # Mock the other git functions to pass
     : # no-op - do nothing
