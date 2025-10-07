@@ -1,7 +1,7 @@
 # update-internal-services-manager pipeline
 
 Tekton pipeline to update the internal-services manager yaml to the latest image in the
-hacbs-release/app-interface-deployments repository.
+github.com/redhat-appstudio/infra-common-deployments repository.
 
 ## Parameters
 

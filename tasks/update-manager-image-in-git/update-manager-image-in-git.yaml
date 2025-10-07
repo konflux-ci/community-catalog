@@ -8,21 +8,15 @@ metadata:
     tekton.dev/tags: "release, tenant"
 spec:
   description: |-
-      Updates the image line in the manager yaml files in the internal-services/manager directory.
-      If mode is `pr`, a pull request is created for the update. If mode is `push`, the change is pushed
-      directly.
+      Updates the image line in the manager yaml files in the internal-services component directories.
   params:
-    - name: mode
+    - name: deployment
       type: string
-      description: Whether the task should create a pull request or directly push. Options are [pr, push]
-    - name: repoBranch
-      type: string
-      description: The branch in the repo to target
-      default: main
+      description: The deployment to be updated. Options are [staging, production]
     - name: repoUrl
       type: string
       description: The repo to update, starting with github.com, without https:// (e.g. github.com/org/repo.git)
-      default: github.com/hacbs/release/app-interface-deployments.git
+      default: github.com/redhat-appstudio/infra-common-deployments.git
     - name: githubSecret
       type: string
       description: The secret containing a `token` key with value set to the GitHub access token
@@ -52,13 +46,15 @@ spec:
           #!/usr/bin/env bash
           set -euxo pipefail
 
-          if ! [[ "$(params.mode)" =~ ^(push|pr)$ ]] ; then
-              echo "Invalid mode parameter. Only 'pr' and 'push' are allowed."
+          if ! [[ "$(params.deployment)" =~ ^(staging|production)$ ]] ; then
+              echo "Invalid deployment parameter. Only 'staging' and 'production' are allowed."
               exit 1
           fi
 
           # Switch to /tmp to avoid filesystem permission issues
           cd /tmp
+
+          BASE_BRANCH=main
 
           set +x
           git clone "https://oauth2:$GITHUB_TOKEN@$(params.repoUrl)" gitRepo
@@ -66,25 +62,27 @@ spec:
           cd gitRepo
           git config --global user.name "$NAME"
           git config --global user.email "$EMAIL"
-          git checkout "$(params.repoBranch)"
+          git checkout "$BASE_BRANCH"
 
-          BRANCH=$(params.repoBranch)
-          if [ "$(params.mode)" = "pr" ] ; then
-              BRANCH="automated-manager-update"
-              git checkout -b "$BRANCH"
-          fi
+          BRANCH="internal-services-$(params.deployment)-manager-update"
+          git checkout -b "$BRANCH"
 
           # Perform substitution
-          find internal-services/manager -type f -name "*.yaml" -exec \
+          find "components/internal-services/internal-$(params.deployment)" -type f -name "manager-*.yaml" -exec \
             sed -i "s|quay.io/konflux-ci/internal-services:.*|$(params.image)|" {} \;
 
           git add .
-          TITLE="chore: update manager image in $(params.repoBranch)"
+          TITLE="chore: update internal-services manager images for $(params.deployment)"
           git commit -m "$TITLE"
           git push -f origin "$BRANCH"
 
-          if [ "$(params.mode)" = "pr" ] ; then
-              # This command will fail if there is already an open PR. In this case, the push before this
-              # will update the PR so it is okay if this fails
-              gh pr create --base "$(params.repoBranch)" --head "$BRANCH" --title "$TITLE" --body "" || true
+          # This command will fail if there is already an open PR. In this case, the push before this
+          # will update the PR so it is okay if this fails
+          PR_URL=$(gh pr create --base "$BASE_BRANCH" --head "$BRANCH" --title "$TITLE" --body "" || echo "")
+          if [[ -n "$PR_URL" ]]; then
+              # If a new PR was created and deployment is staging, add /lgtm and /approve comments so it automerges
+              if [[ "$(params.deployment)" == "staging" ]]; then
+                  gh pr comment "$PR_URL" --body "/lgtm"
+                  gh pr comment "$PR_URL" --body "/approve"
+              fi
           fi

@@ -12,10 +12,8 @@ spec:
       taskRef:
         name: update-manager-image-in-git
       params:
-        - name: mode
-          value: pr
-        - name: repoBranch
-          value: main
+        - name: deployment
+          value: staging
         - name: repoUrl
           value: github.com/org/repo
         - name: githubSecret
