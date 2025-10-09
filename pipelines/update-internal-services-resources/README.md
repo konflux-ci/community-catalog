@@ -1,7 +1,7 @@
-# update-internal-services-manager pipeline
+# update-internal-services-resources pipeline
 
-Tekton pipeline to update the internal-services manager yaml to the latest image in the
-github.com/redhat-appstudio/infra-common-deployments repository.
+Tekton pipeline to copy the internal-services resource files and update the manager yamls
+to the latest image in the github.com/redhat-appstudio/infra-common-deployments repository.
 
 ## Parameters
 
