@@ -2,22 +2,21 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-update-manager-fail-invalid-deployment
-  annotations:
-    test/assert-task-failure: "run-task"
+  name: test-internal-services
 spec:
   description: |
-    Run the update-manager-image-in-git with an invalid `deployment` param and ensure the task fails.
+    Run the update-internal-services task. It doesn't use a workspace, so there isn't a way to
+    ensure the changes were made, but we can still check that the task succeeds.
   tasks:
     - name: run-task
       taskRef:
-        name: update-manager-image-in-git
+        name: update-internal-services
       params:
         - name: deployment
-          value: other
+          value: staging
         - name: repoUrl
           value: github.com/org/repo
         - name: githubSecret
-          value: update-manager-secret
+          value: update-internal-services-secret
         - name: image
           value: quay.io/konflux-ci/internal-services:12345678

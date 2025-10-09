@@ -1,0 +1,123 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: update-internal-services
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: "release, tenant"
+spec:
+  description: |-
+      Creates a PR to update the internal-services resources from the sha of the internal-services repo and
+      bump the image lines in the manager yaml files to the specified version.
+  params:
+    - name: deployment
+      type: string
+      description: The deployment to be updated. Options are [staging, production]
+    - name: repoUrl
+      type: string
+      description: The repo to update, starting with github.com, without https:// (e.g. github.com/org/repo.git)
+      default: github.com/redhat-appstudio/infra-common-deployments.git
+    - name: githubSecret
+      type: string
+      description: The secret containing a `token` key with value set to the GitHub access token
+    - name: image
+      type: string
+      description: The manager image to update to
+  steps:
+    - name: update-repo
+      image: quay.io/konflux-ci/release-service-utils:9089cafbf36bb889b4b73d8c2965613810f13736
+      env:
+        - name: GITHUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.githubSecret)
+              key: token
+        - name: EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: $(params.githubSecret)
+              key: email
+        - name: NAME
+          valueFrom:
+            secretKeyRef:
+              name: $(params.githubSecret)
+              key: name
+      script: |
+          #!/usr/bin/env bash
+          set -euxo pipefail
+
+          if ! [[ "$(params.deployment)" =~ ^(staging|production)$ ]] ; then
+              echo "Invalid deployment parameter. Only 'staging' and 'production' are allowed."
+              exit 1
+          fi
+
+          # Switch to /tmp to avoid filesystem permission issues
+          cd /tmp
+
+          BASE_BRANCH=main
+          GIT_REPO=/tmp/gitRepo
+          IS_REPO=/tmp/internal-services
+
+          git clone https://github.com/konflux-ci/internal-services "$IS_REPO"
+          cd "$IS_REPO"
+          # Use the image param to get the sha
+          NEW_COMMIT=$(cut -d ':' -f 2 <<< "$(params.image)")
+          git checkout "$NEW_COMMIT"
+
+          set +x
+          git clone "https://oauth2:$GITHUB_TOKEN@$(params.repoUrl)" "$GIT_REPO"
+          set -x
+          cd "$GIT_REPO"
+          git config --global user.name "$NAME"
+          git config --global user.email "$EMAIL"
+          git checkout "$BASE_BRANCH"
+
+          BRANCH="internal-services-$(params.deployment)-manager-update"
+          git checkout -b "$BRANCH"
+
+          # CRDs and RBAC are in base, so only copy them if it is a staging PR
+          if [[ "$(params.deployment)" == "staging" ]]; then
+              cp "${IS_REPO}/config/crd/bases/"*.yaml "components/internal-services/base/crds"
+              cp "${IS_REPO}/config/rbac/"*.yaml "components/internal-services/base/rbac"
+              # Fix namespace in rbac files
+              find "components/internal-services/base/rbac" -type f \
+                -exec sed -i 's/namespace: system/namespace: internal-services/' {} \;
+              # Add konflux-release-team group to role_binding.yaml
+              yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
+                components/internal-services/base/rbac/role_binding.yaml
+              # Maintain the view-authenticated-users RoleBinding in kustomization.yaml
+              echo "  - view-authenticated-users.yaml" >> components/internal-services/base/rbac/kustomization.yaml
+          fi
+
+          PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
+            "components/internal-services/internal-$(params.deployment)/manager" | head -n 1 | cut -d ':' -f 4)
+          # Perform manager substitution
+          find "components/internal-services/internal-$(params.deployment)/manager" -type f -name "manager-*.yaml" \
+            -exec sed -i "s|quay.io/konflux-ci/internal-services:.*|$(params.image)|" {} \;
+
+          git add .
+          TITLE="chore: update internal-services resources for $(params.deployment)"
+          git commit -m "$TITLE"
+          git push -f origin "$BRANCH"
+
+          # This command will fail if there is already an open PR. In this case, the push before this
+          # will update the PR so it is okay if this fails
+          PR_URL=$(gh pr create --base "$BASE_BRANCH" --head "$BRANCH" --title "$TITLE" --body "" || echo "")
+          if [[ -n "$PR_URL" ]]; then
+              # If a new PR was created and deployment is staging, add /lgtm and /approve comments so it automerges
+              if [[ "$(params.deployment)" == "staging" ]]; then
+                  # Workaround to do a multi line comment in one call
+                  echo -e "/lgtm\n/approve" | gh pr comment "$PR_URL" --body-file -
+              fi
+          fi
+
+          # Add a comment listing the diff between the base commit and one we are bumping to
+          pushd "$IS_REPO"
+          for commit in $(git log --format="%H" "${PREV_COMMIT}..${NEW_COMMIT}") ; do
+              title=$(git log --format="%s" -1 "$commit")
+              echo "https://github.com/konflux-ci/internal-services/commit/$commit $title" >> /tmp/commit_list
+          done
+          popd
+          # This won't work if run from $IS_REPO
+          gh pr comment "$PR_URL" --body-file /tmp/commit_list

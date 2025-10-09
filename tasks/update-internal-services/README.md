@@ -1,6 +1,7 @@
-# update-manager-image-in-git
+# update-internal-services
 
-Updates the image line in the manager yaml files in the internal-services component directories.
+Creates a PR to update the internal-services resources from the sha of the internal-services repo and
+bump the image lines in the manager yaml files to the specified version.
 
 ## Parameters
 
