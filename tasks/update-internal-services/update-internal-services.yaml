@@ -80,9 +80,9 @@ spec:
           if [[ "$(params.deployment)" == "staging" ]]; then
               cp "${IS_REPO}/config/crd/bases/"*.yaml "components/internal-services/base/crds"
               cp "${IS_REPO}/config/rbac/"*.yaml "components/internal-services/base/rbac"
-              # Fix namespace in rbac files
+              # Remove namespace line in rbac files
               find "components/internal-services/base/rbac" -type f \
-                -exec sed -i 's/namespace: system/namespace: internal-services/' {} \;
+                -exec sed -i '/namespace: system/d' {} \;
               # Add konflux-release-team group to role_binding.yaml
               yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
                 components/internal-services/base/rbac/role_binding.yaml
@@ -101,23 +101,25 @@ spec:
           git commit -m "$TITLE"
           git push -f origin "$BRANCH"
 
-          # This command will fail if there is already an open PR. In this case, the push before this
-          # will update the PR so it is okay if this fails
-          PR_URL=$(gh pr create --base "$BASE_BRANCH" --head "$BRANCH" --title "$TITLE" --body "" || echo "")
-          if [[ -n "$PR_URL" ]]; then
-              # If a new PR was created and deployment is staging, add /lgtm and /approve comments so it automerges
-              if [[ "$(params.deployment)" == "staging" ]]; then
-                  # Workaround to do a multi line comment in one call
-                  echo -e "/lgtm\n/approve" | gh pr comment "$PR_URL" --body-file -
-              fi
-          fi
-
-          # Add a comment listing the diff between the base commit and one we are bumping to
+          # Build commit list for PR description
           pushd "$IS_REPO"
           for commit in $(git log --format="%H" "${PREV_COMMIT}..${NEW_COMMIT}") ; do
               title=$(git log --format="%s" -1 "$commit")
               echo "https://github.com/konflux-ci/internal-services/commit/$commit $title" >> /tmp/commit_list
           done
           popd
-          # This won't work if run from $IS_REPO
-          gh pr comment "$PR_URL" --body-file /tmp/commit_list
+
+          # This command will fail if there is already an open PR. In this case, the push before this
+          # will update the PR so it is okay if this fails
+          PR_URL=$(gh pr create --base "$BASE_BRANCH" --head "$BRANCH" --title "$TITLE" \
+            --body-file /tmp/commit_list || echo "")
+          if [[ -n "$PR_URL" ]]; then
+              # If a new PR was created and deployment is staging, add /lgtm and /approve comments so it automerges
+              if [[ "$(params.deployment)" == "staging" ]]; then
+                  # Workaround to do a multi line comment in one call
+                  echo -e "/lgtm\n/approve" | gh pr comment "$PR_URL" --body-file -
+              fi
+          else
+              # PR already exists, update its description with new commit list
+              gh pr edit "$BRANCH" --body-file /tmp/commit_list
+          fi
