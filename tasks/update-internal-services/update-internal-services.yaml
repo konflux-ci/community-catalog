@@ -87,7 +87,7 @@ spec:
               yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
                 components/internal-services/base/rbac/role_binding.yaml
               # Maintain the view-authenticated-users RoleBinding in kustomization.yaml
-              echo "- view-authenticated-users.yaml" >> components/internal-services/base/rbac/kustomization.yaml
+              echo "  - view-authenticated-users.yaml" >> components/internal-services/base/rbac/kustomization.yaml
           fi
 
           PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
