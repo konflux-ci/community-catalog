@@ -2,14 +2,14 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: update-internal-services-manager
+  name: update-internal-services-resources
   annotations:
     tekton.dev/pipelines.minVersion: "0.12.1"
     tekton.dev/tags: "release, tenant"
 spec:
   description: |-
-    Tekton pipeline to update the internal-services manager yaml to the latest image in the
-    hacbs-release/app-interface-deployments repository.
+    Tekton pipeline to copy the internal-services resource files and update the manager yamls
+    to the latest image in the github.com/redhat-appstudio/infra-common-deployments repository.
   params:
     - name: release
       type: string
@@ -35,7 +35,7 @@ spec:
       params:
         - name: release
           value: $(params.release)
-    - name: update-staging-manager
+    - name: create-staging-pr
       taskRef:
         resolver: "git"
         params:
@@ -44,19 +44,17 @@ spec:
           - name: revision
             value: development
           - name: pathInRepo
-            value: tasks/update-manager-image-in-git/update-manager-image-in-git.yaml
+            value: tasks/update-internal-services/update-internal-services.yaml
       params:
-        - name: mode
-          value: push
-        - name: repoBranch
-          value: main
+        - name: deployment
+          value: staging
         - name: repoUrl
           value: $(params.repoUrl)
         - name: githubSecret
           value: $(params.githubSecret)
         - name: image
           value: $(tasks.get-git-sha-image-ref-from-release.results.imageRef)
-    - name: update-production-manager
+    - name: create-production-pr
       taskRef:
         resolver: "git"
         params:
@@ -65,12 +63,10 @@ spec:
           - name: revision
             value: development
           - name: pathInRepo
-            value: tasks/update-manager-image-in-git/update-manager-image-in-git.yaml
+            value: tasks/update-internal-services/update-internal-services.yaml
       params:
-        - name: mode
-          value: pr
-        - name: repoBranch
-          value: stable
+        - name: deployment
+          value: production
         - name: repoUrl
           value: $(params.repoUrl)
         - name: githubSecret
