@@ -36,7 +36,7 @@ A timeout for the entire task execution is not handled internally. For that, you
 | `idms-content`   | The string content of the `ImageDigestMirrorSet` YAML file. | No       | -             |
 | `auth-json`      | JSON object containing the authentication content to use.   | Yes      | `'{"auths": {}}'` |
 | `retries`        | The maximum number of validation attempts.                  | Yes      | `3`           |
-| `retry-interval` | The time to wait between retries, in seconds.               | Yes      | `300`         |
+| `retry-interval` | The time to wait between retries, in seconds.               | Yes      | `600`         |
 
 ## Dependencies
 
@@ -71,5 +71,5 @@ Here is an example of how to call this task from a `Pipeline`, overriding the de
     - name: retries
       value: "3" # The default is 3
     - name: retry-interval
-      value: "300" # The default is 300 seconds (5 minutes)
+      value: "600" # The default is 600 seconds (10 minutes)
 ```

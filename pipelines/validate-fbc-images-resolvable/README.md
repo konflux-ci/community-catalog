@@ -24,7 +24,7 @@ The primary goal of this integration test is to ensure the integrity of an FBC i
 | `REPO_TOKEN` | The name of a Kubernetes Secret containing the access token needed to clone a private Git repository. | Yes | `""` | 
 | `REPO_KEY` | The key within the `REPO_TOKEN` secret that holds the access token value. | Yes | `""` | 
 | `RETRIES` | The maximum number of validation attempts for the validation task. | Yes | `"3"` | 
-| `RETRY_INTERVAL` | The time to wait between retries for the validation task, in seconds. | Yes | `"300"` | 
+| `RETRY_INTERVAL` | The time to wait between retries for the validation task, in seconds. | Yes | `"600"` | 
 
 ## How It Works
 

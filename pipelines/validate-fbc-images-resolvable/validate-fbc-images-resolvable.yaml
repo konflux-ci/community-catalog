@@ -54,7 +54,7 @@ spec:
     - name: RETRY_INTERVAL
       description: The time to wait between retries for the validation task, in seconds.
       type: string
-      default: "300"
+      default: "600"
   tasks:
     - name: parse-metadata
       taskSpec:
