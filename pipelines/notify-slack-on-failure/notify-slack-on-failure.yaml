@@ -9,6 +9,7 @@ metadata:
 spec:
   description: |-
     Sends an error message to Slack using postMessage API if managed pipelines fail.
+    Optionally, it can also send a notification on success.
   params:
     - name: secretName
       type: string
@@ -19,6 +20,10 @@ spec:
     - name: release
       type: string
       description: Namespaced name of release - should be in format "namespace/name"
+    - name: notifySuccess
+      type: string
+      description: If set to "true", it will also send notification on success
+      default: "false"
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the community-catalog tasks to be used are stored
@@ -44,3 +49,5 @@ spec:
           value: $(params.secretKeyName)
         - name: release
           value: $(params.release)
+        - name: notifySuccess
+          value: $(params.notifySuccess)

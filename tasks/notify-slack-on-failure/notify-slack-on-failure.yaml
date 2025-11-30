@@ -6,6 +6,7 @@ metadata:
 spec:
   description: |-
     Sends an error message to Slack using postMessage API if managed pipelines fail.
+    Optionally, it can also send a notification on success.
   params:
     - name: secretName
       description: Name of secret which contains authentication token for app
@@ -13,6 +14,9 @@ spec:
       description: Name of key within secret which contains webhook URL
     - name: release
       description: Namespaced name of release - should be in format "namespace/name"
+    - name: notifySuccess
+      description: If set to "true", it will also send notification on success
+      default: "false"
   volumes:
     - name: slack-token
       secret:
@@ -28,6 +32,8 @@ spec:
       env:
         - name: KEYNAME
           value: $(params.secretKeyName)
+        - name: NOTIFY_SUCCESS
+          value: $(params.notifySuccess)
       script: |
         #!/usr/bin/env bash
         set -eux
@@ -54,25 +60,41 @@ spec:
         IFS='/' read -r RELEASE_NAMESPACE RELEASE_NAME <<< "$(params.release)"
         RELEASECONDITIONS=$(kubectl get release "$RELEASE_NAME" -n "$RELEASE_NAMESPACE" \
           -o jsonpath='{.status.conditions}' | jq '.[] | select(.type == "ManagedPipelineProcessed")')
-        
+
         RELEASESTATUS=$(jq -r '.reason' <<< "$RELEASECONDITIONS")
 
         if [[ "$RELEASESTATUS" == *"Failed"* ]]; then
-          MESSAGE=$(jq -r '.message' <<< "$RELEASECONDITIONS" | awk NF)
-          
-          # need 3 back-ticks around message for code-block
-          MESSAGE=$(echo -n "Managed pipelines failed: \`\`\`$MESSAGE\`\`\`" | jq -Rsa)
-          
-          cat > /tmp/payload.json << EOF
-        {"text": $MESSAGE}
-        EOF
-          # line above needs to be missing indentation
+          CONDITION_MESSAGE=$(jq -r '.message' <<< "$RELEASECONDITIONS" | awk NF)
 
-          echo "Calling Slack API with curl...."
-          set +x
-          curl -H "Content-type: application/json" --data-binary "@/tmp/payload.json"  \
-            "${WEBHOOK_URL}"
-          set -x
+          if [ -n "$CONDITION_MESSAGE" ]; then
+            MESSAGE=$(printf "Release: %s/%s\n\nManaged pipelines failed: \`\`\`%s\`\`\`" \
+              "$RELEASE_NAMESPACE" "$RELEASE_NAME" "$CONDITION_MESSAGE")
+          else
+            MESSAGE=$(printf "Release: %s/%s\n\nManaged pipelines failed." \
+              "$RELEASE_NAMESPACE" "$RELEASE_NAME")
+          fi
+        elif [[ "${NOTIFY_SUCCESS}" == "true" ]] && [[ "$RELEASESTATUS" == *"Succeeded"* ]]; then
+          CONDITION_MESSAGE=$(jq -r '.message' <<< "$RELEASECONDITIONS" | awk NF)
+
+          if [ -n "$CONDITION_MESSAGE" ]; then
+            MESSAGE=$(printf "Release: %s/%s\n\nManaged pipelines succeeded: \`\`\`%s\`\`\`" \
+              "$RELEASE_NAMESPACE" "$RELEASE_NAME" "$CONDITION_MESSAGE")
+          else
+            MESSAGE=$(printf "Release: %s/%s\n\nManaged pipelines succeeded." \
+              "$RELEASE_NAMESPACE" "$RELEASE_NAME")
+          fi
         else
-          echo "All pipelines succeeded."
+          echo "All pipelines succeeded. Not sending notification (notifySuccess=${NOTIFY_SUCCESS})."
+          exit
         fi
+
+        cat > /tmp/payload.json << EOF
+        {"text": $(echo -n "$MESSAGE" | jq -Rsa .)}
+        EOF
+        # line above needs to be missing indentation
+
+        echo "Calling Slack API with curl...."
+        set +x
+        curl -H "Content-type: application/json" --data-binary "@/tmp/payload.json"  \
+          "${WEBHOOK_URL}"
+        set -x
