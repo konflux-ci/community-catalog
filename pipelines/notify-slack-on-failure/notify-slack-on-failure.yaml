@@ -24,6 +24,16 @@ spec:
       type: string
       description: If set to "true", it will also send notification on success
       default: "false"
+    - name: slackHandles
+      type: string
+      description: Comma-separated list of Slack member IDs or group IDs to be tagged on failures
+      default: ""
+    - name: tagSuccess
+      type: string
+      description: |-
+        If set to "true", will tag users in success notifications as well
+        (only applies when notifySuccess is true)
+      default: "false"
     - name: taskGitUrl
       type: string
       description: The url to the git repo where the community-catalog tasks to be used are stored
@@ -51,3 +61,7 @@ spec:
           value: $(params.release)
         - name: notifySuccess
           value: $(params.notifySuccess)
+        - name: slackHandles
+          value: $(params.slackHandles)
+        - name: tagSuccess
+          value: $(params.tagSuccess)

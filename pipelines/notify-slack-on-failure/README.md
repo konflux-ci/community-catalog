@@ -11,5 +11,7 @@ Optionally, it can also send a notification on success.
 | secretKeyName   | Name of key within secret which contains webhook URL                            | No       | -                                                   |
 | release         | Namespaced name of release - should be in format "namespace/name"               | No       | -                                                   |
 | notifySuccess   | If set to "true", it will also send a notification on success.                  | Yes      | "false"                                             |
+| slackHandles    | Comma-separated list of Slack member IDs or group IDs to be tagged on failures  | Yes      | ""                                                  |
+| tagSuccess      | If set to "true", will tag users in success notifications as well (only applies when notifySuccess is true) | Yes      | "false"                                             |
 | taskGitUrl      | The url to the git repo where the community-catalog tasks to be used are stored | Yes      | https://github.com/konflux-ci/community-catalog.git |
 | taskGitRevision | The revision in the taskGitUrl repo to be used                                  | No       | -                                                   |
