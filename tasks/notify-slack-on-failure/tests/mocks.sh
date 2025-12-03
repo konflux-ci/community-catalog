@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-# SC2016 - "Expressions don't expand in single quotes, use double quotes for that." 
+# SC2016 - "Expressions don't expand in single quotes, use double quotes for that."
 # is disabled because line 26 is checking for backticks, so single quotes are being
 # used to prevent ```SAMPLE ERROR MESSAGE``` from being expanded
 
@@ -10,8 +10,8 @@ set -eux
 # mocks to be injected into task step scripts
 
 function curl() {
-  echo Mock curl called with: $*
-  echo $* >> /tmp/mock_curl.txt
+  echo Mock curl called with: "$*"
+  echo "$*" >> /tmp/mock_curl.txt
 
   if [[ "$*" != "-H Content-type: application/json --data-binary @/tmp/payload.json ABCDEF"* ]]
   then
@@ -22,14 +22,30 @@ function curl() {
   # no workspaces to pass information along, but there's only one test that actually uses curl.
   # if any other test manages to use curl, release is set to 'ns/success' in all other tests
   # so they won't reproduce the error message and the test will fail
-  if [ "$(cat /tmp/payload.json)" != \
-    '{"text": "Managed pipelines failed: ```SAMPLE ERROR MESSAGE```"}' ]; then
+  ACTUAL_TEXT=$(cat /tmp/payload.json | jq -r '.text')
+
+  # Check for message format with release namespace/name:
+  # For failure test: must contain release name and error message
+  # For success test: must contain release name and success message
+  if echo "$ACTUAL_TEXT" | grep -q "Release: ns/fail"; then
+    if ! echo "$ACTUAL_TEXT" | grep -q "SAMPLE ERROR MESSAGE"; then
+      echo Error: unexpected message
+      echo Actual text: "$ACTUAL_TEXT"
+      exit 1
+    fi
+  elif echo "$ACTUAL_TEXT" | grep -q "Release: ns/success"; then
+    if ! echo "$ACTUAL_TEXT" | grep -q "Managed pipelines succeeded"; then
+      echo Error: unexpected message
+      echo Actual text: "$ACTUAL_TEXT"
+      exit 1
+    fi
+  else
     echo Error: unexpected message
-    cat /tmp/payload.json
+    echo Actual text: "$ACTUAL_TEXT"
     exit 1
   fi
 
-  # makes sure curl is not called multiple times on test-notify-slack-release-failure.yaml
+  # makes sure curl is not called multiple times
   if [ "$(wc -l < /tmp/mock_curl.txt)" != 1 ]; then
     echo Error: curl was expected to be called 1 times. Actual calls:
     cat /tmp/mock_curl.txt
