@@ -17,6 +17,10 @@ spec:
         - name: secretKeyName
           value: "my-team"
         - name: release
-          value: "ns/success"
+          value: "ns/release-success-with-notify"
         - name: notifySuccess
           value: "true"
+        - name: tagSuccess
+          value: "true"
+        - name: slackHandles
+          value: "Usuccess1, Usuccess2"

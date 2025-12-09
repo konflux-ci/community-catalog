@@ -5,9 +5,11 @@ Optionally, it can also send a notification on success.
 
 ## Parameters
 
-| Name          | Description                                                       | Optional | Default value |
-|---------------|-------------------------------------------------------------------|----------|---------------|
-| secretName    | Name of secret which contains authentication token for app        | No       | -             |
-| secretKeyName | Name of key within secret which contains webhook URL              | No       | -             |
-| release       | Namespaced name of release - should be in format "namespace/name" | No       | -             |
-| notifySuccess | If set to "true", it will also send notification on success       | Yes      | "false"       |
+| Name          | Description                                                                     | Optional | Default value |
+|---------------|---------------------------------------------------------------------------------|----------|---------------|
+| secretName    | Name of secret which contains authentication token for app                      | No       | -             |
+| secretKeyName | Name of key within secret which contains webhook URL                            | No       | -             |
+| release       | Namespaced name of release - should be in format "namespace/name"               | No       | -             |
+| notifySuccess | If set to "true", it will also send notification on success                     | Yes      | "false"       |
+| slackHandles  | Comma-separated list of Slack member IDs or group IDs to be tagged on failures  | Yes      | ""            |
+| tagSuccess    | If set to "true", will tag users in success notifications as well (only applies when notifySuccess is true) | Yes      | "false"       |

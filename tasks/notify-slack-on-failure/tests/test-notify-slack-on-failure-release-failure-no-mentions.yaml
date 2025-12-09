@@ -2,11 +2,11 @@
 apiVersion: tekton.dev/v1
 kind: Pipeline
 metadata:
-  name: test-notify-slack-on-failure-release-failure
+  name: test-notify-slack-on-failure-release-failure-no-mentions
 spec:
   description: |
     Run the notify-slack-on-failure task with a release that
-    has failed
+    has failed but without mentions to verify no tags are included
   tasks:
     - name: run-task
       taskRef:
@@ -17,6 +17,4 @@ spec:
         - name: secretKeyName
           value: "my-team"
         - name: release
-          value: "ns/release-failure"
-        - name: slackHandles
-          value: "Ufail1, Ufail2,Ufail3,Sfail1"
+          value: "ns/release-failure-no-mentions"

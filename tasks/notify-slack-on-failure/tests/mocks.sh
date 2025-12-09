@@ -19,25 +19,63 @@ function curl() {
     exit 1
   fi
 
-  # no workspaces to pass information along, but there's only one test that actually uses curl.
-  # if any other test manages to use curl, release is set to 'ns/success' in all other tests
-  # so they won't reproduce the error message and the test will fail
+  # Extract the actual message text from the JSON payload
+  # We distinguish test cases by the message content (release namespace/name and presence of mentions)
   ACTUAL_TEXT=$(cat /tmp/payload.json | jq -r '.text')
 
+  # Check for mentions and message content once - we'll verify them based on the test case
+  HAS_UFAIL1=$(echo "$ACTUAL_TEXT" | grep -c "<@Ufail1>" || true)
+  HAS_UFAIL2=$(echo "$ACTUAL_TEXT" | grep -c "<@Ufail2>" || true)
+  HAS_UFAIL3=$(echo "$ACTUAL_TEXT" | grep -c "<@Ufail3>" || true)
+  HAS_SFAIL1=$(echo "$ACTUAL_TEXT" | grep -c "<!subteam^Sfail1>" || true)
+  HAS_USUCCESS1=$(echo "$ACTUAL_TEXT" | grep -c "<@Usuccess1>" || true)
+  HAS_USUCCESS2=$(echo "$ACTUAL_TEXT" | grep -c "<@Usuccess2>" || true)
+  HAS_FAILURE=$(echo "$ACTUAL_TEXT" | grep -c "SAMPLE ERROR MESSAGE" || true)
+  HAS_SUCCESS=$(echo "$ACTUAL_TEXT" | grep -c "Managed pipelines succeeded" || true)
+
   # Check for message format with release namespace/name:
-  # For failure test: must contain release name and error message
-  # For success test: must contain release name and success message
-  if echo "$ACTUAL_TEXT" | grep -q "Release: ns/fail"; then
-    if ! echo "$ACTUAL_TEXT" | grep -q "SAMPLE ERROR MESSAGE"; then
-      echo Error: unexpected message
+  # Each test uses a unique release name matching the test case
+  if echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-failure" && [ "$HAS_FAILURE" -eq 0 ]; then
+    echo Error: unexpected message
+    echo Actual text: "$ACTUAL_TEXT"
+    exit 1
+  fi
+
+  # Distinguish between failure test cases by release name
+  if echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-failure-no-mentions"; then
+    # This test should have NO mentions
+    if [ "$HAS_UFAIL1" -gt 0 ] || [ "$HAS_UFAIL2" -gt 0 ] || [ "$HAS_UFAIL3" -gt 0 ] || [ "$HAS_SFAIL1" -gt 0 ]; then
+      echo "Error: unexpected mentions found in failure message without mentions"
       echo Actual text: "$ACTUAL_TEXT"
       exit 1
     fi
-  elif echo "$ACTUAL_TEXT" | grep -q "Release: ns/success"; then
-    if ! echo "$ACTUAL_TEXT" | grep -q "Managed pipelines succeeded"; then
-      echo Error: unexpected message
+  elif echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-failure" && ! echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-failure-no-mentions"; then
+    # This is the release-failure test (with mentions), verify mentions are present
+    if [ "$HAS_UFAIL1" -eq 0 ] || [ "$HAS_UFAIL2" -eq 0 ] || [ "$HAS_UFAIL3" -eq 0 ] || [ "$HAS_SFAIL1" -eq 0 ]; then
+      echo "Error: expected mentions <@Ufail1>, <@Ufail2>, <@Ufail3>, and <!subteam^Sfail1> not found"
       echo Actual text: "$ACTUAL_TEXT"
       exit 1
+    fi
+  elif (echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-success-with-notify" || echo "$ACTUAL_TEXT" | grep -q "Release: ns/success-mentions-no-tag") && [ "$HAS_SUCCESS" -eq 0 ]; then
+    echo Error: unexpected message
+    echo Actual text: "$ACTUAL_TEXT"
+    exit 1
+  elif echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-success-with-notify" || echo "$ACTUAL_TEXT" | grep -q "Release: ns/success-mentions-no-tag"; then
+    # Distinguish between success test cases by release name
+    if echo "$ACTUAL_TEXT" | grep -q "Release: ns/release-success-with-notify"; then
+      # This test has tagSuccess=true, mentions should be present
+      if [ "$HAS_USUCCESS1" -eq 0 ] || [ "$HAS_USUCCESS2" -eq 0 ]; then
+        echo "Error: expected mentions <@Usuccess1> and <@Usuccess2> not found in success message"
+        echo Actual text: "$ACTUAL_TEXT"
+        exit 1
+      fi
+    elif echo "$ACTUAL_TEXT" | grep -q "Release: ns/success-mentions-no-tag"; then
+      # This test has tagSuccess=false, mentions should NOT be present
+      if [ "$HAS_USUCCESS1" -gt 0 ] || [ "$HAS_USUCCESS2" -gt 0 ]; then
+        echo "Error: unexpected mentions found in success message without tagSuccess"
+        echo Actual text: "$ACTUAL_TEXT"
+        exit 1
+      fi
     fi
   else
     echo Error: unexpected message

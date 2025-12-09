@@ -17,4 +17,4 @@ spec:
         - name: secretKeyName
           value: "my-team"
         - name: release
-          value: "ns/success"
+          value: "ns/release-success"
