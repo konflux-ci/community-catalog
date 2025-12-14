@@ -101,7 +101,7 @@ spec:
           # Trim leading/trailing whitespace from the final string
           MENTIONS=$(echo "$MENTIONS" | xargs)
           # Set prefix with mentions
-          MENTIONS_PREFIX="$MENTIONS\n\n"
+          MENTIONS_PREFIX=$(printf "%s\n\n" "$MENTIONS")
           # Restore IFS
           IFS=$OLD_IFS
         fi
