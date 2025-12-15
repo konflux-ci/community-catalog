@@ -19,6 +19,15 @@ function curl() {
     exit 1
   fi
 
+  # Check for literal \n characters in the raw JSON (before decoding)
+  # This verifies that the JSON payload contains literal \n instead of actual newlines
+  RAW_JSON=$(cat /tmp/payload.json)
+  if echo "$RAW_JSON" | grep -q '\\\\n'; then
+    echo "Error: Found literal \\\\n in JSON payload (should be actual newlines)"
+    echo "Raw JSON: $RAW_JSON"
+    exit 1
+  fi
+
   # Extract the actual message text from the JSON payload
   # We distinguish test cases by the message content (release namespace/name and presence of mentions)
   ACTUAL_TEXT=$(cat /tmp/payload.json | jq -r '.text')
