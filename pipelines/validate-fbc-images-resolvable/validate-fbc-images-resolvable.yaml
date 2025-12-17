@@ -33,6 +33,10 @@ spec:
       description: The path within the source Git repository to the ImageDigestMirrorSet configuration file.
       type: string
       default: ".tekton/images-mirror-set.yaml"
+    - name: MIRROR_SET_SHA256
+      description: The SHA256 checksum of the ImageDigestMirrorSet configuration file.
+      type: string
+      default: ""
     - name: AUTH_SECRETS
       description: >-
         JSON array of secret name/namespace pairs for registry authentication.
@@ -114,6 +118,8 @@ spec:
           value: $(tasks.parse-metadata.results.source-git-revision)
         - name: pathInRepo
           value: $(params.PATH_TO_MIRROR_SET)
+        - name: sha256_checksum
+          value: $(params.MIRROR_SET_SHA256)
         - name: REPO_TOKEN
           value: $(params.REPO_TOKEN)
         - name: REPO_KEY

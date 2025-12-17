@@ -56,7 +56,7 @@ function curl() {
   if [[ "$url" == *"yq"* ]]; then
     # Create a mock yq binary
     echo '#!/bin/bash
-echo "yq version 4.45.4"' > "$output"
+echo "yq version 4.50.1"' > "$output"
     chmod +x "$output"
   elif [[ "$url" == *"opm"* ]]; then
     # Create a mock opm binary
@@ -136,7 +136,7 @@ function yq() {
   echo "Mock yq called with: $*"
   
   if [[ "$*" == "--version" ]]; then
-    echo "yq version 4.45.4"
+    echo "yq version 4.50.1"
     return 0
   fi
   
@@ -299,8 +299,30 @@ function mapfile() {
 
 function uname() {
   if [[ "$*" == "-m" ]]; then
-    echo "x86_64"
+    # Default to x86_64, but allow override via environment variable for testing
+    echo "${MOCK_ARCH:-x86_64}"
   else
     command uname "$@"
+  fi
+}
+
+function sha256sum() {
+  echo "Mock sha256sum called with: $*" >&2
+  
+  # Check if we're validating a checksum (--check flag)
+  if [[ "$*" == *"--check"* ]]; then
+    # Read expected checksum and file from stdin
+    local check_line
+    read -r check_line
+    
+    # For testing, always return success (checksums match)
+    # This allows tests to pass the new checksum validation
+    local file=$(echo "$check_line" | awk '{print $2}')
+    echo "$file: OK"
+    return 0
+  else
+    # Calculate checksum (for echo -n "$file_content" | sha256sum cases)
+    # Return a valid-looking checksum
+    echo "abc123def456789012345678901234567890123456789012345678901234567890  -"
   fi
 } 

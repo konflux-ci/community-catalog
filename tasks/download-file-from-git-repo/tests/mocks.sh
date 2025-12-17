@@ -6,12 +6,12 @@ set -eux
 function curl() {
   echo Mock curl called with: $* >&2
   echo $* >> /tmp/mock_curl.txt 2>&1
-  
+
   local output_file=""
   local url=""
   local auth_header=""
   local http_code_flag=false
-  
+
   # Parse arguments
   while [[ $# -gt 0 ]]; do
     case $1 in
@@ -41,7 +41,7 @@ function curl() {
         ;;
     esac
   done
-  
+
   # Determine response based on URL patterns
   if [[ "$url" == *"404-test"* ]]; then
     echo "404" # HTTP status code
@@ -178,7 +178,7 @@ function kubectl() {
       return 0
     fi
   fi
-  
+
   # Default kubectl behavior
   echo "Mock kubectl called with: $*"
 }
@@ -194,7 +194,7 @@ function base64() {
       # Read from stdin (pipe input)
       read -r input
     fi
-    
+
     case "$input" in
       "dG9rZW4tZm9yLXByaXZhdGUtcmVwbw==")
         echo "token-for-private-repo"
@@ -231,4 +231,75 @@ function mktemp() {
 function cat() {
   # Use real cat but ensure it works with our test files
   command cat "$@"
-} 
+}
+
+function sha256sum() {
+  echo "Mock sha256sum called with: $*" >&2
+
+  # Check if we're validating a checksum (--check flag)
+  if [[ "$*" == *"--check"* ]]; then
+    # Read the expected checksum from stdin
+    local check_line
+    read -r check_line
+    local expected_checksum=$(echo "$check_line" | awk '{print $1}')
+    local file=$(echo "$check_line" | awk '{print $2}')
+
+    # For test purposes, validate based on content
+    if [[ -f "$file" ]]; then
+      local content=$(cat "$file")
+      # Mock: validate based on known test patterns
+      case "$content" in
+        "public-github-file-content")
+          local actual="5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+          ;;
+        "private-github-file-content")
+          local actual="c99a5c31c55d7c4f9e4ec3f8e3a8d8f5c7b6a5d4e3f2a1b0c9d8e7f6a5b4c3d2"
+          ;;
+        "public-gitlab-file-content")
+          local actual="a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890"
+          ;;
+        "private-gitlab-file-content")
+          local actual="b2c3d4e5f67890123456789012345678901234567890123456789012345678901a"
+          ;;
+        *)
+          local actual="calculated-checksum-for-content"
+          ;;
+      esac
+
+      if [[ "$expected_checksum" == "$actual" ]]; then
+        echo "$file: OK"
+        return 0
+      else
+        echo "$file: FAILED"
+        return 1
+      fi
+    fi
+  else
+    # Calculate checksum from stdin or file
+    local input
+    if [[ -n "${1:-}" ]] && [[ -f "$1" ]]; then
+      input=$(cat "$1")
+    else
+      input=$(cat)
+    fi
+
+    # Return mock checksums based on content
+    case "$input" in
+      "public-github-file-content")
+        echo "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8  -"
+        ;;
+      "private-github-file-content")
+        echo "c99a5c31c55d7c4f9e4ec3f8e3a8d8f5c7b6a5d4e3f2a1b0c9d8e7f6a5b4c3d2  -"
+        ;;
+      "public-gitlab-file-content")
+        echo "a1b2c3d4e5f6789012345678901234567890123456789012345678901234567890  -"
+        ;;
+      "private-gitlab-file-content")
+        echo "b2c3d4e5f67890123456789012345678901234567890123456789012345678901a  -"
+        ;;
+      *)
+        echo "calculated-checksum-for-content  -"
+        ;;
+    esac
+  fi
+}

@@ -1,0 +1,27 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-download-file-invalid-checksum
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Test downloading a file with invalid SHA256 checksum (should fail)
+  tasks:
+    - name: run-task
+      taskRef:
+        name: download-file-from-git-repo
+      params:
+        - name: url
+          value: "https://github.com/org/public-repo"
+        - name: revision
+          value: "main"
+        - name: pathInRepo
+          value: "README.md"
+        - name: sha256_checksum
+          value: "0000000000000000000000000000000000000000000000000000000000000000"
+        - name: REPO_TOKEN
+          value: ""
+        - name: REPO_KEY
+          value: ""

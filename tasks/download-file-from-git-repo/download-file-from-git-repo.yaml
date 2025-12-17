@@ -14,6 +14,10 @@ spec:
       description: The Git revision (branch, tag, or commit SHA) where the file is located.
     - name: pathInRepo
       description: The full path to the file within the repository.
+    - name: sha256_checksum
+      description: The SHA256 checksum of the file to download.
+      type: string
+      default: ""
     - name: REPO_TOKEN
       description: The name of the Kubernetes Secret that contains an access token for a private Git repository.
       type: string
@@ -31,7 +35,7 @@ spec:
       script: |
         #!/usr/bin/env bash
         set -euo pipefail
-        
+
         # Sanitize inputs to remove any potential leading/trailing whitespace, including newlines.
         CLEAN_URL=$(xargs <<< "$(params.url)")
         CLEAN_REVISION=$(xargs <<< "$(params.revision)")
@@ -39,10 +43,11 @@ spec:
 
         file_url="${CLEAN_URL}/raw/${CLEAN_REVISION}/${CLEAN_PATH}"
         echo "Attempting to fetch file from URL: ${file_url}"
-        
+
         CURL_OUTPUT=$(mktemp)
+        echo "Writing to file: $CURL_OUTPUT"
         CURL_ARGS=(-w "%{http_code}" -L -o "$CURL_OUTPUT")
-        
+
         if [[ -n "$(params.REPO_TOKEN)" ]]; then
           echo "Source repository is private, using token from secret '$(params.REPO_TOKEN)'."
           TOKEN=$(kubectl get secret "$(params.REPO_TOKEN)" -o jsonpath="{.data.$(params.REPO_KEY)}" | base64 -d)
@@ -51,7 +56,7 @@ spec:
             '$(params.REPO_TOKEN)' with key '$(params.REPO_KEY)'."
             exit 1
           fi
-          
+
           if [[ "$CLEAN_URL" == *"github.com"* ]]; then
             AUTH_HEADER="Authorization: token $TOKEN"
           elif [[ "$CLEAN_URL" == *"gitlab."* ]]; then
@@ -66,7 +71,7 @@ spec:
         fi
 
         HTTP_STATUS=$(curl "${CURL_ARGS[@]}" "$file_url")
-        
+
         if [[ "$HTTP_STATUS" -ne 200 ]]; then
             echo "ERROR: Failed to fetch file. curl responded with HTTP status: ${HTTP_STATUS}"
             echo "URL: ${file_url}"
@@ -75,14 +80,26 @@ spec:
             echo "---------------------"
             exit 1
         fi
-        
+
         file_content=$(cat "$CURL_OUTPUT")
-        
+        echo "Fetched file content:"
+        echo "$file_content"
+
         if [[ -z "$file_content" ]]; then
             echo "ERROR: Fetched file is empty, but request was successful (HTTP 200)."
             echo "URL: ${file_url}"
             exit 1
         fi
-        
+
+        if [[ -n "$(params.sha256_checksum)" ]]; then
+          calculated_checksum=$(sha256sum "$CURL_OUTPUT" | awk '{print $1}')
+          if [[ "$calculated_checksum" != "$(params.sha256_checksum)" ]]; then
+            echo "ERROR: Calculated SHA256 checksum does not match the expected checksum."
+            echo "Expected: $(params.sha256_checksum)"
+            echo "Calculated: $calculated_checksum"
+            exit 1
+          fi
+        fi
+
         echo "Successfully fetched file content."
         echo -n "$file_content" > "$(results.content.path)"

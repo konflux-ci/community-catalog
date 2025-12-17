@@ -1,0 +1,25 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-download-file-valid-checksum
+spec:
+  description: |
+    Test downloading a file with valid SHA256 checksum verification
+  tasks:
+    - name: run-task
+      taskRef:
+        name: download-file-from-git-repo
+      params:
+        - name: url
+          value: "https://github.com/org/public-repo"
+        - name: revision
+          value: "main"
+        - name: pathInRepo
+          value: "README.md"
+        - name: sha256_checksum
+          value: "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8"
+        - name: REPO_TOKEN
+          value: ""
+        - name: REPO_KEY
+          value: ""

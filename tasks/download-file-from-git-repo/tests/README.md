@@ -17,6 +17,10 @@ This directory contains tests for the `download-file-from-git-repo` task.
 - `test-download-file-invalid-key.yaml` - Test handling of invalid secret keys
 - `test-download-file-unknown-provider.yaml` - Test handling of unknown git providers
 
+### Checksum Validation Tests
+- `test-download-file-valid-checksum.yaml` - Test successful download with correct SHA256 checksum verification
+- `test-download-file-invalid-checksum.yaml` - Test failure when SHA256 checksum doesn't match (expected to fail)
+
 ## Mock Functions
 
 The `mocks.sh` file contains mock implementations of:
@@ -25,6 +29,7 @@ The `mocks.sh` file contains mock implementations of:
 - `base64` - Simulates base64 encoding/decoding
 - `xargs` - Simulates whitespace trimming
 - `mktemp` - Creates temporary files for testing
+- `sha256sum` - Simulates SHA256 checksum calculation and verification
 
 ## Test Scenarios
 
@@ -40,6 +45,7 @@ The `mocks.sh` file contains mock implementations of:
 - Missing Kubernetes secret
 - Invalid secret key
 - Unknown git provider
+- Invalid SHA256 checksum (checksum mismatch)
 
 ## Mock Behavior
 
@@ -60,6 +66,12 @@ The mock functions simulate different scenarios based on URL patterns and authen
 - URLs containing `empty-test`: Return empty content
 - URLs containing `private-repo`: Require authentication
 - URLs containing `unknown-provider`: Test unknown provider handling
+
+### Checksum Mock Behavior
+The `sha256sum` mock function:
+- Returns predefined checksums for known test content patterns (public/private GitHub and GitLab files)
+- Supports both calculation mode (piped input) and verification mode (`--check` flag)
+- Validates checksums against expected values when using `--check`
 
 ## Running Tests
 
