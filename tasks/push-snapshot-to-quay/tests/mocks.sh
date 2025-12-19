@@ -207,7 +207,7 @@ EOF
       },
       {
         "name": "test-image4",
-        "repository": "quay.io/default-repo2",
+        "repositories": [{"url":"quay.io/default-repo2"}],
         "tags": [
           "skip-image",
           "testtag"
