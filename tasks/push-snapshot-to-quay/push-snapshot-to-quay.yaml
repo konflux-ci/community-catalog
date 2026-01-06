@@ -137,49 +137,51 @@ spec:
           fi
 
           CONTAINER_IMAGE=$(jq -r '.containerImage' <<< "$COMPONENT")
-          REPOSITORY=$(jq -r '.repository' <<< "$COMPONENT_DESTINATION")
+          REPOSITORIES=$(jq -r '.repository // .repositories[].url' <<< "$COMPONENT_DESTINATION")
 
-          git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
-          all_tags=$(jq -n \
-            --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
-            --argjson t "$(jq '.tags//[]' <<< "$COMPONENT_DESTINATION")" \
-            '$d+$t|unique')
-          # Set IFS to newline to properly handle tags with spaces
-          IFS=$'\n'
-          for tag in $(jq -r '.[]' <<< "$all_tags"); do
-            # Basic templating - only if git source data is available
-            if [[ -n "$git_sha" && "$git_sha" != "null" ]]; then
-              tag="${tag//\{\{ git_short_sha \}\}/${git_sha:0:7}}"
-              tag="${tag//\{\{ git_sha \}\}/$git_sha}"
-            fi
-            # If tag needs image metadata, do inspection for all templating
-            if [[ "$tag" == *"{{ timestamp }}"* || "$tag" == *"{{ release_timestamp }}"* || \
-                  "$tag" == *"{{ labels."* ]]; then
-              aj="$(get-image-architectures "$CONTAINER_IMAGE")"
-              im="$(skopeo inspect --retry-times 3 --no-tags \
-                --override-os "$(jq -rs 'map(.platform.os)|.[0]' <<< "$aj")" \
-                --override-arch "$(jq -rs 'map(.platform.architecture)|.[0]' <<< "$aj")" \
-                docker://"$CONTAINER_IMAGE"|jq -c)"
-              tf=$(jq -r --arg d "$(jq -r '.defaults.timestampFormat//"%s"' <<< "$RP_DATA")" \
-                '.timestampFormat//$d' <<< "$COMPONENT_DESTINATION")
-              # Apply all templating using the image metadata
-              build_date=$(jq -r '.Labels."build-date"//.Created//""' <<< "$im")
-              timestamp_value=$([ -n "$build_date" ] && date -d "$build_date" "+$tf" || echo "")
-              tag="${tag//\{\{ timestamp \}\}/$timestamp_value}"
-              tag="${tag//\{\{ release_timestamp \}\}/$(date "+$tf")}"
-              while [[ $tag =~ \{\{\ *labels\.([[:alnum:]_-]+)\ *\}\} ]]; do
-                label_value=$(jq -r --arg l "${BASH_REMATCH[1]}" '.Labels[$l]//""' <<< "$im")
-                tag="${tag//\{\{ labels.${BASH_REMATCH[1]} \}\}/$label_value}"
-              done
-            fi
-            # Incrementer templating
-            if [[ "$tag" == *"{{ incrementer }}"* ]]; then
-              vp="${tag//\{\{ incrementer \}\}/}"
-              mn=$(skopeo list-tags --retry-times 3 docker://"$REPOSITORY" 2>/dev/null | \
-                jq -r '.Tags[]' | grep -E "^${vp}[0-9]+$" | sed -E "s/${vp}//" | sort -nr | head -n1)
-              tag="${tag//\{\{ incrementer \}\}/$((mn + 1))}"
-            fi
-            push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$tag"
+          for REPOSITORY in ${REPOSITORIES}; do
+            git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
+            all_tags=$(jq -n \
+              --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
+              --argjson t "$(jq '.tags//[]' <<< "$COMPONENT_DESTINATION")" \
+              '$d+$t|unique')
+            # Set IFS to newline to properly handle tags with spaces
+            IFS=$'\n'
+            for tag in $(jq -r '.[]' <<< "$all_tags"); do
+              # Basic templating - only if git source data is available
+              if [[ -n "$git_sha" && "$git_sha" != "null" ]]; then
+                tag="${tag//\{\{ git_short_sha \}\}/${git_sha:0:7}}"
+                tag="${tag//\{\{ git_sha \}\}/$git_sha}"
+              fi
+              # If tag needs image metadata, do inspection for all templating
+              if [[ "$tag" == *"{{ timestamp }}"* || "$tag" == *"{{ release_timestamp }}"* || \
+                    "$tag" == *"{{ labels."* ]]; then
+                aj="$(get-image-architectures "$CONTAINER_IMAGE")"
+                im="$(skopeo inspect --retry-times 3 --no-tags \
+                  --override-os "$(jq -rs 'map(.platform.os)|.[0]' <<< "$aj")" \
+                  --override-arch "$(jq -rs 'map(.platform.architecture)|.[0]' <<< "$aj")" \
+                  docker://"$CONTAINER_IMAGE"|jq -c)"
+                tf=$(jq -r --arg d "$(jq -r '.defaults.timestampFormat//"%s"' <<< "$RP_DATA")" \
+                  '.timestampFormat//$d' <<< "$COMPONENT_DESTINATION")
+                # Apply all templating using the image metadata
+                build_date=$(jq -r '.Labels."build-date"//.Created//""' <<< "$im")
+                timestamp_value=$([ -n "$build_date" ] && date -d "$build_date" "+$tf" || echo "")
+                tag="${tag//\{\{ timestamp \}\}/$timestamp_value}"
+                tag="${tag//\{\{ release_timestamp \}\}/$(date "+$tf")}"
+                while [[ $tag =~ \{\{\ *labels\.([[:alnum:]_-]+)\ *\}\} ]]; do
+                  label_value=$(jq -r --arg l "${BASH_REMATCH[1]}" '.Labels[$l]//""' <<< "$im")
+                  tag="${tag//\{\{ labels.${BASH_REMATCH[1]} \}\}/$label_value}"
+                done
+              fi
+              # Incrementer templating
+              if [[ "$tag" == *"{{ incrementer }}"* ]]; then
+                vp="${tag//\{\{ incrementer \}\}/}"
+                mn=$(skopeo list-tags --retry-times 3 docker://"$REPOSITORY" 2>/dev/null | \
+                  jq -r '.Tags[]' | grep -E "^${vp}[0-9]+$" | sed -E "s/${vp}//" | sort -nr | head -n1)
+                tag="${tag//\{\{ incrementer \}\}/$((mn + 1))}"
+              fi
+              push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$tag"
+            done
           done
 
         done
