@@ -143,7 +143,7 @@ spec:
             git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
             all_tags=$(jq -n \
               --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
-              --argjson t "$(jq '.tags//[]' <<< "$COMPONENT_DESTINATION")" \
+              --argjson t "$(jq '.tags // .repositories[].tags' <<< "$COMPONENT_DESTINATION")" \
               '$d+$t|unique')
             # Set IFS to newline to properly handle tags with spaces
             IFS=$'\n'
