@@ -143,7 +143,8 @@ spec:
             git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
             if jq -e '.repositories' <<< "$COMPONENT_DESTINATION" > /dev/null 2>&1; then
               repo_tags=$(jq -r --arg repo "$REPOSITORY" \                                                                                                                                                                                                                                            
-                '.repositories[] | select(.url == $repo) | .tags // []' <<< "$COMPONENT_DESTINATION")
+                '.repositories[] | select(.url == $repo) | .tags // []' \
+                <<< "$COMPONENT_DESTINATION")
             else
               repo_tags=$(jq '.tags // []' <<< "$COMPONENT_DESTINATION")
             fi
