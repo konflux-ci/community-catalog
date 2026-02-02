@@ -141,9 +141,16 @@ spec:
 
           for REPOSITORY in ${REPOSITORIES}; do
             git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
+            if jq -e '.repositories' <<< "$COMPONENT_DESTINATION" > /dev/null 2>&1; then
+              repo_tags=$(jq -r --arg repo "$REPOSITORY" \
+                '.repositories[] | select(.url == $repo) | .tags // []' \
+                <<< "$COMPONENT_DESTINATION")
+            else
+              repo_tags=$(jq '.tags // []' <<< "$COMPONENT_DESTINATION")
+            fi
             all_tags=$(jq -n \
               --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
-              --argjson t "$(jq '.tags//[]' <<< "$COMPONENT_DESTINATION")" \
+              --argjson t "$repo_tags" \
               '$d+$t|unique')
             # Set IFS to newline to properly handle tags with spaces
             IFS=$'\n'
