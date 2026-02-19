@@ -30,9 +30,10 @@ on:
         type: boolean
         required: true
         default: false
-  schedule:
-    # UTC time
-    - cron: "15 14 * * 3"
+  # All production promotions must be manually reviewed and approved.
+  # schedule:
+  #   # UTC time
+  #   - cron: "15 14 * * 3"
 permissions:
   contents: write
   actions: write
