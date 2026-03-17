@@ -17,9 +17,9 @@ The pipeline uses the `update-jira-issues` task to perform the actual JIRA updat
 | snapshot                | The namespaced name (namespace/name) of the snapshot                                          | No       | -                                                     |
 | taskGitUrl              | The url to the git repo where the community-catalog tasks to be used are stored              | Yes      | https://github.com/konflux-ci/community-catalog.git  |
 | taskGitRevision         | The revision in the taskGitUrl repo to be used                                                | Yes      | development                                          |
-| jira_server             | The server of the Jira instance to update issues on                                           | Yes      | issues.redhat.com                                     |
+| jira_server             | The server of the Jira instance to update issues on                                           | Yes      | redhat.atlassian.net                                     |
 | jira_project_regex      | The regex to match the Jira project to update issues on                                       | Yes      | "OCPBUGS-[0-9]+"                                      |
-| jira_target_state       | The target Jira state to transition issues to                                               | Yes      | "ON_QA"                                               |
+| jira_target_state       | The Jira transition target. Can match transition action name or destination status name     | Yes      | "ON_QA"                                               |
 | jira_skip_states        | The Jira states that should be skipped                                                      | Yes      | "Verified,Release Pending,Closed"                     |
 
 ## Workspaces
@@ -30,7 +30,9 @@ The pipeline uses the `update-jira-issues` task to perform the actual JIRA updat
 
 ## Prerequisites
 
-- A secret named `konflux-jira-secret` containing a `token` key with a valid Jira access token
+- A secret named `konflux-jira-secret` containing:
+  - a `user` key with a valid Jira Cloud username/email
+  - a `token` key with a valid Jira API token
 - A secret named `konflux-github-secret` containing a `token` key with a valid Github access token
 - The snapshot must contain at least one component with a container image
 - The container image must have `vcs-ref` and `url` labels pointing to a valid Git repository
@@ -47,13 +49,15 @@ The pipeline uses the `update-jira-issues` task to perform the actual JIRA updat
    - Checks the current status of the Jira issue
    - If the issue is in a skip state (e.g., "Verified", "Release Pending", "Closed"), skips processing
    - If the issue is not already in the target state:
+     - Resolves a transition by matching either transition action name (`.name`) or destination status name (`.to.name`) in a case-insensitive way
      - Transitions the issue to the target state
      - Adds a comment with the staging build information
 5. Continues processing remaining components
 
 ## Notes
 
-- Currently only supports issues in issues.redhat.com due to authentication requirements
+- Currently only supports issues in redhat.atlassian.net due to authentication requirements
 - Issues in other servers will be skipped without the pipeline failing
 - The pipeline uses the default regex pattern `OCPBUGS-[0-9]+` to match Red Hat OpenShift bug tracker issues
 - Issues in skip states (default: "Verified", "Release Pending", "Closed") will be skipped without processing
+- The default target value `ON_QA` is typically used as a destination status name (for example, `MODIFIED -> ON_QA`), but the input can also match a transition action label if that is what your workflow exposes

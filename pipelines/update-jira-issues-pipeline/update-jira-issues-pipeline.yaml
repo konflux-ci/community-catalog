@@ -34,7 +34,7 @@ spec:
     - name: jira_server
       type: string
       description: The server of the Jira instance to update issues on
-      default: issues.redhat.com
+      default: redhat.atlassian.net
     - name: jira_project_regex
       type: string
       description: The regex to match the Jira project to update issues on

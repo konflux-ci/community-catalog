@@ -6,16 +6,16 @@ Updates Jira issues to a specified target state (default: ON_QA) when a staging 
 
 This task extracts Jira issue references from pull request titles in a release snapshot and updates those issues to a specified target state (default: "ON_QA"). It is designed to run after a staging build is released to automatically track issue progression.
 
-**Note:** This task currently only supports issues in issues.redhat.com due to authentication requirements. Issues in other servers will be skipped without the task failing.
+**Note:** This task currently only supports issues in redhat.atlassian.net due to authentication requirements. Issues in other servers will be skipped without the task failing.
 
 ## Parameters
 
 | Name               | Description                                                                                    | Optional | Default value                                         |
 |-------------------|------------------------------------------------------------------------------------------------|----------|-------------------------------------------------------|
 | snapshot          | The namespaced name (namespace/name) of the snapshot                                          | No       | -                                                     |
-| jira_server       | The server of the Jira instance to update issues on                                           | Yes      | issues.redhat.com                                     |
+| jira_server       | The server of the Jira instance to update issues on                                           | Yes      | redhat.atlassian.net                                     |
 | jira_project_regex| The regex to match the Jira project to update issues on                                       | Yes      | "OCPBUGS-[0-9]+"                                      |
-| jira_target_state| The target Jira state to transition issues to                                               | Yes      | "ON_QA"                                               |
+| jira_target_state| The Jira transition target. Can match transition action name or destination status name     | Yes      | "ON_QA"                                               |
 | jira_skip_states| The Jira states that should be skipped                                                      | Yes      | "Verified,Release Pending,Closed"                     |
 
 ## Workspaces
@@ -26,7 +26,9 @@ This task extracts Jira issue references from pull request titles in a release s
 
 ## Prerequisites
 
-- A secret named `konflux-jira-secret` containing a `token` key with a valid Jira access token
+- A secret named `konflux-jira-secret` containing:
+  - a `user` key with a valid Jira Cloud username/email
+  - a `token` key with a valid Jira API token
 - The snapshot must contain at least one component with a container image
 - The container image must have `vcs-ref` and `url` labels pointing to a valid Git repository
 - GitHub CLI (`gh`) must be available and configured for API access
@@ -41,6 +43,7 @@ This task extracts Jira issue references from pull request titles in a release s
    - Checks the current status of the Jira issue
    - If the issue is in a skip state (e.g., "Verified", "Release Pending", "Closed"), skips processing
    - If the issue is not already in the target state:
+     - Resolves a transition by matching either transition action name (`.name`) or destination status name (`.to.name`) in a case-insensitive way
      - Transitions the issue to the target state
      - Adds a comment with the staging build information
    - If the issue is already in the target state, skips processing
@@ -53,3 +56,4 @@ This task extracts Jira issue references from pull request titles in a release s
 - **Skip**: If an issue is in a skip state or already in the target state, that component is skipped and processing continues
 - **Error**: If no container images can be extracted from the snapshot, the task exits with code 1
 - **Error**: If a component has an empty image, the task exits with code 1
+- **Note**: The default target value `ON_QA` is typically used as a destination status name (for example, `MODIFIED -> ON_QA`), but task input may also match a transition action label if that is what your workflow exposes
