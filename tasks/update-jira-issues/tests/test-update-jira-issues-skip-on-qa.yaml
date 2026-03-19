@@ -18,7 +18,7 @@ spec:
         - name: snapshot
           value: "default/konflux-test-container-98765"
         - name: jira_server
-          value: "issues.redhat.com"
+          value: "redhat.atlassian.net"
         - name: jira_project_regex
           value: "OCPBUGS-[0-9]+"
         - name: jira_target_state

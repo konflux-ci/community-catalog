@@ -65,18 +65,18 @@ function jq() {
     echo "abc123def456"
   elif [[ "$*" == *".Labels[\"url\"]"* ]]; then
     echo "https://github.com/example/konflux-test-container.git"
-  elif [[ "$*" == *".transitions[] | select(.name==\"ON_QA\") | .id"* ]]; then
+  elif [[ "$*" == *".transitions[] |"* ]] && [[ "$*" == *"ascii_downcase"* ]]; then
     echo "123"
   elif [[ "$*" == *".fields.status.name"* ]]; then
     echo "ON_QA"
   elif [[ "$*" == *".servers[] | contains"* ]]; then
-    echo "rest/api/2/issue"
+    echo "rest/api/3/issue"
   elif [[ "$*" == *".[0] | \"\\(.title)\""* ]]; then
     echo "OCPBUGS-12345: Fix important OCP issue"
   elif [[ "$*" == *"[] | select(.servers[] | contains"* ]]; then
-    echo "rest/api/2/issue"
+    echo "rest/api/3/issue"
   elif [[ "$*" == *"select(.servers[] | contains"* ]]; then
-    echo "rest/api/2/issue"
+    echo "rest/api/3/issue"
   else
     echo Error: Unexpected jq call: $*
     exit 1
@@ -124,7 +124,7 @@ function curl-with-retry() {
 }
 EOF
     cat /tmp/mock_transitions.json
-  elif [[ "$*" == *"rest/api/2/issue"* ]] && [[ "$*" != *"transitions"* ]] && [[ "$*" != *"comment"* ]]; then
+  elif [[ "$*" == *"rest/api/3/issue"* ]] && [[ "$*" != *"transitions"* ]] && [[ "$*" != *"comment"* ]]; then
     # Mock issue status API response
     cat > /tmp/mock_issue_status.json <<EOF
 {

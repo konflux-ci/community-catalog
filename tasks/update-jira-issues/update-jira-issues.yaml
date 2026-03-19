@@ -12,7 +12,7 @@ spec:
     It is meant to run after a staging build is released.
     A comment will be added to the issue with a link to the staging build it was fixed in.
 
-    Note: This task currently only supports issues in issues.redhat.com due to it requiring authentication.
+    Note: This task currently only supports issues in redhat.atlassian.net due to it requiring authentication.
     Issues in other servers will be skipped without the task failing.
   params:
     - name: snapshot
@@ -21,7 +21,7 @@ spec:
     - name: jira_server
       type: string
       description: The server of the Jira instance to update issues on
-      default: issues.redhat.com
+      default: redhat.atlassian.net
     - name: jira_project_regex
       type: string
       description: The regex to match the Jira project to update issues on
@@ -38,6 +38,11 @@ spec:
     - name: update-issues
       image: quay.io/konflux-ci/release-service-utils:b7f90a1dde20efe9a4063c1082c4f0ce31113bb1
       env:
+        - name: JIRA_USER
+          valueFrom:
+            secretKeyRef:
+              name: konflux-jira-secret
+              key: user
         - name: JIRA_ACCESS_TOKEN
           valueFrom:
             secretKeyRef:
@@ -55,10 +60,11 @@ spec:
 
         ISSUE_TRACKERS='{
             "Jira": {
-                "api": "rest/api/2/issue",
+                "api": "rest/api/3/issue",
                 "servers": [
                     "issues.redhat.com",
-                    "jira.atlassian.com"
+                    "jira.atlassian.com",
+                    "redhat.atlassian.net"
                 ]
             },
             "bugzilla": {
@@ -114,8 +120,19 @@ spec:
           echo "issue: $issue"
           echo "server: $server"
 
+          # Atlassian Cloud auth requires Basic base64(user:token).
+          if [ -z "${JIRA_USER:-}" ]; then
+              echo "Error: JIRA_USER is required for Jira Cloud Basic auth."
+              exit 1
+          fi
+          if [ -z "${JIRA_ACCESS_TOKEN:-}" ]; then
+              echo "Error: JIRA_ACCESS_TOKEN is required for Jira Cloud Basic auth."
+              exit 1
+          fi
+          jira_basic_auth="$(printf '%s:%s' "$JIRA_USER" "$JIRA_ACCESS_TOKEN" | base64 | tr -d '\n')"
+          jira_auth_header="Authorization: Basic $jira_basic_auth"
           CURL_ARGS=(
-              -H "Authorization: Bearer $JIRA_ACCESS_TOKEN"
+              -H "$jira_auth_header"
               --retry 3
           )
 
@@ -147,7 +164,11 @@ spec:
           STATUS_RC=0
           # Get the target state transition id. This varies per Jira project
           if ! STATUS_ID="$(curl-with-retry "${CURL_ARGS[@]}" "${API_URL}/transitions" \
-              | jq -er '.transitions[] | select(.name=="'"$target_state"'") | .id')"; then
+              | jq -er '.transitions[] |
+                  select(
+                    (.name | ascii_downcase) == ("'"$target_state"'" | ascii_downcase) or
+                    (.to.name | ascii_downcase) == ("'"$target_state"'" | ascii_downcase)
+                  ) | .id')"; then
               echo "Warning: failed to fetch the $target_state state id for issue $issue." \
                   "We most likely do not have permission to update it."
               STATUS_RC=1
