@@ -183,8 +183,9 @@ spec:
               # Incrementer templating
               if [[ "$tag" == *"{{ incrementer }}"* ]]; then
                 vp="${tag//\{\{ incrementer \}\}/}"
-                mn=$(skopeo list-tags --retry-times 3 docker://"$REPOSITORY" 2>/dev/null | \
-                  jq -r '.Tags[]' | grep -E "^${vp}[0-9]+$" | sed -E "s/${vp}//" | sort -nr | head -n1)
+                mn=$(skopeo list-tags --retry-times 3 docker://"$REPOSITORY" 2>/dev/null |
+                  jq -r '.Tags[]' | grep -v "^${vp}${git_sha:0:7}" | grep -E "^${vp}[0-9]+$" |
+                  sed -E "s/${vp}//" | sort -nr | head -n1)
                 tag="${tag//\{\{ incrementer \}\}/$((mn + 1))}"
               fi
               push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$tag"
