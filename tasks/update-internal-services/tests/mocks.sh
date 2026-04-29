@@ -23,8 +23,10 @@ function git() {
       "$gitRepo"/components/internal-services/internal-production/manager/manager-one.yaml \
       "$gitRepo"/components/internal-services/internal-production/manager/manager-two.yaml \
       "$gitRepo"/components/internal-services/internal-production/manager/manager-three.yaml
-    mkdir -p "$gitRepo"/components/internal-services/base/crd
-    mkdir -p "$gitRepo"/components/internal-services/base/rbac
+    mkdir -p "$gitRepo"/components/internal-services/internal-staging/crds
+    mkdir -p "$gitRepo"/components/internal-services/internal-staging/rbac
+    mkdir -p "$gitRepo"/components/internal-services/internal-production/crds
+    mkdir -p "$gitRepo"/components/internal-services/internal-production/rbac
   elif [[ "$*" == 'git log --format="%H"'* ]]; then
       echo abcdefg
       echo zyxwvu
