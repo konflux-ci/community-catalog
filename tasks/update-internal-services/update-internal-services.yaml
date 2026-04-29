@@ -76,21 +76,21 @@ spec:
           BRANCH="internal-services-$(params.deployment)-manager-update"
           git checkout -b "$BRANCH"
 
-          # CRDs and RBAC are in base, so only copy them if it is a staging PR
-          if [[ "$(params.deployment)" == "staging" ]]; then
-              cp "${IS_REPO}/config/crd/bases/"*.yaml "components/internal-services/base/crds"
-              cp "${IS_REPO}/config/rbac/"*.yaml "components/internal-services/base/rbac"
-              # Remove namespace line in rbac files
-              find "components/internal-services/base/rbac" -type f \
-                -exec sed -i '/namespace: system/d' {} \;
-              # Add konflux-release-team group to role_binding.yaml
-              yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
-                components/internal-services/base/rbac/role_binding.yaml
-              # Maintain additional RBAC files that are not in upstream kustomization.yaml
-              echo "  - view-authenticated-users.yaml" >> components/internal-services/base/rbac/kustomization.yaml
-              echo "  - release_team_role.yaml" >> components/internal-services/base/rbac/kustomization.yaml
-              echo "  - release_team_role_binding.yaml" >> components/internal-services/base/rbac/kustomization.yaml
-          fi
+          OVERLAY_PATH="components/internal-services/internal-$(params.deployment)"
+          cp "${IS_REPO}/config/crd/bases/"*.yaml "${OVERLAY_PATH}/crds"
+          cp "${IS_REPO}/config/rbac/"*.yaml "${OVERLAY_PATH}/rbac"
+          # Remove namespace line in rbac files
+          find "${OVERLAY_PATH}/rbac" -type f \
+            -exec sed -i '/namespace: system/d' {} \;
+          # Add konflux-release-team group to role_binding.yaml
+          yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
+            "${OVERLAY_PATH}/rbac/role_binding.yaml"
+          # Maintain additional RBAC files that are not in upstream kustomization.yaml
+          {
+            echo "  - view-authenticated-users.yaml"
+            echo "  - release_team_role.yaml"
+            echo "  - release_team_role_binding.yaml"
+          } >> "${OVERLAY_PATH}/rbac/kustomization.yaml"
 
           PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
             "components/internal-services/internal-$(params.deployment)/manager" | head -n 1 | cut -d ':' -f 4)
