@@ -90,6 +90,7 @@ spec:
             echo "  - view-authenticated-users.yaml"
             echo "  - release_team_role.yaml"
             echo "  - release_team_role_binding.yaml"
+            echo "  - signing-sa.yaml"
           } >> "${OVERLAY_PATH}/rbac/kustomization.yaml"
 
           PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
