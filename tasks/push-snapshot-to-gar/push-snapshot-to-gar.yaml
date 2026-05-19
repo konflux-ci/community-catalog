@@ -1,0 +1,208 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: push-snapshot-to-gar
+spec:
+  description: |-
+    Push snapshot images to Google Artifact Registry using cosign copy.
+    Authenticates to GAR via Workload Identity Federation (WIF) using
+    docker-credential-gcr as a Docker credential helper.
+
+    Source images are pulled from the origin OCI registry using
+    select-oci-auth. Destination auth is handled by a projected
+    Kubernetes service account token exchanged through GCP STS.
+
+    Prerequisites:
+    - A ConfigMap containing GCP WIF credential configuration JSON
+    - A GCP Workload Identity Pool and Provider configured to trust
+      the Konflux cluster OIDC issuer
+    - A GCP service account with artifactregistry.writer on the target repo
+    - The release pipeline ServiceAccount must have appropriate RBAC
+  params:
+    - name: release
+      description: Namespaced name of release (namespace/name)
+      type: string
+    - name: releasePlan
+      description: Namespaced name of release plan (namespace/name)
+      type: string
+    - name: snapshot
+      description: Namespaced name of snapshot (namespace/name)
+      type: string
+    - name: wifConfigMapName
+      description: Name of the ConfigMap containing GCP WIF credential configuration JSON
+      type: string
+      default: gar-wif-config
+    - name: wifAudience
+      description: Expected audience claim for the projected service account token, must match the WIF provider's allowed_audiences
+      type: string
+    - name: taskImage
+      description: Image with docker-credential-gcr, cosign, skopeo, oras, jq, kubectl, and select-oci-auth
+      type: string
+      default: quay.io/redhat-services-prod/gcp-hcp-tenant/gcp-release-utils@sha256:cca965aaf2d67bad3f4949bffe2e920bebae1ad2edd6c95391b5ca96ee7e8242
+    - name: skipAttestations
+      description: If true, skip copying attestations and signatures
+      type: string
+      default: "false"
+  volumes:
+    - name: wif-config
+      configMap:
+        name: $(params.wifConfigMapName)
+    - name: oidc-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              path: oidc-token
+              expirationSeconds: 3600
+              audience: $(params.wifAudience)
+  steps:
+    - name: push-snapshot-to-gar
+      image: $(params.taskImage)
+      env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /var/run/secrets/wif/config.json
+      volumeMounts:
+        - name: wif-config
+          mountPath: /var/run/secrets/wif
+          readOnly: true
+        - name: oidc-token
+          mountPath: /var/run/secrets/tokens
+          readOnly: true
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        TMPFILES=()
+        cleanup() { rm -rf "${TMPFILES[@]}"; }
+        trap cleanup EXIT
+
+        mktmp() { local f; f=$(mktemp "$@"); TMPFILES+=("$f"); echo "$f"; }
+
+        push_image() {
+          unset DOCKER_CONFIG
+          local NAME="$1"
+          local CONTAINER_IMAGE="$2"
+          local REPOSITORY="$3"
+          local TAG="$4"
+
+          SOURCE_AUTH_FILE=$(mktmp)
+          SOURCE_REPO=${CONTAINER_IMAGE%%@sha256:*}
+          SOURCE_REGISTRY=${SOURCE_REPO%%/*}
+          select-oci-auth "$CONTAINER_IMAGE" | jq -c \
+            '.auths."'"$SOURCE_REPO"'" = .auths."'"$SOURCE_REGISTRY"'" | del(.auths."'"$SOURCE_REGISTRY"'")' > "$SOURCE_AUTH_FILE"
+
+          DEST_AUTH_DIR=$(mktmp -d)
+          DEST_REGISTRY=${REPOSITORY%%/*}
+          cat > "$DEST_AUTH_DIR/config.json" << AUTHEOF
+        {
+          "credHelpers": {
+            "${DEST_REGISTRY}": "gcr"
+          }
+        }
+        AUTHEOF
+
+          WIF_ERR=$(mktmp)
+          if ! DOCKER_CONFIG="$DEST_AUTH_DIR" docker-credential-gcr get <<< "https://$DEST_REGISTRY" > /dev/null 2>"$WIF_ERR"; then
+            echo "ERROR: WIF authentication to $DEST_REGISTRY failed:"
+            cat "$WIF_ERR"
+            exit 1
+          fi
+
+          RESOLVE_OUTPUT=$(DOCKER_CONFIG="$DEST_AUTH_DIR" oras resolve "$REPOSITORY:$TAG" 2>&1 || true)
+          if [[ "$RESOLVE_OUTPUT" =~ ^sha256: ]]; then
+            DESTINATION_DIGEST="$RESOLVE_OUTPUT"
+          elif [[ "$RESOLVE_OUTPUT" == *"not found"* ]]; then
+            DESTINATION_DIGEST=""
+          else
+            echo "ERROR: Unexpected failure resolving $REPOSITORY:$TAG"
+            echo "$RESOLVE_OUTPUT"
+            exit 1
+          fi
+          ORIGIN_DIGEST=$(oras resolve --registry-config "$SOURCE_AUTH_FILE" "$CONTAINER_IMAGE")
+
+          if [[ "$DESTINATION_DIGEST" != "$ORIGIN_DIGEST" || -z "$DESTINATION_DIGEST" ]]; then
+            set -x
+            if [[ "$(params.skipAttestations)" == "true" ]]; then
+              skopeo copy --all \
+                --src-authfile "$SOURCE_AUTH_FILE" \
+                --dest-authfile "$DEST_AUTH_DIR/config.json" \
+                "docker://$CONTAINER_IMAGE" "docker://$REPOSITORY:$TAG"
+            else
+              DOCKER_CONFIG="$(mktmp -d)"
+              export DOCKER_CONFIG
+              jq -s '.[0] * .[1]' "$SOURCE_AUTH_FILE" "$DEST_AUTH_DIR/config.json" > "$DOCKER_CONFIG/config.json"
+              cosign copy -f "$CONTAINER_IMAGE" "$REPOSITORY:$TAG"
+            fi
+            set +x
+
+            echo "Pushed image $CONTAINER_IMAGE to $REPOSITORY:$TAG"
+          else
+            echo "Component push skipped (source digest exists at destination): $NAME"
+          fi
+        }
+
+        IFS='/' read -r SNAPSHOT_NAMESPACE SNAPSHOT_NAME <<< "$(params.snapshot)"
+        SNAPSHOT_SPEC=$(kubectl get snapshot "$SNAPSHOT_NAME" -n "$SNAPSHOT_NAMESPACE" \
+          -o jsonpath='{.spec}') || { echo "ERROR: Failed to get snapshot $(params.snapshot)"; exit 1; }
+
+        IFS='/' read -r RP_NAMESPACE RP_NAME <<< "$(params.releasePlan)"
+        RP_DATA=$(kubectl get releaseplan "$RP_NAME" -n "$RP_NAMESPACE" \
+          -o jsonpath='{.spec.data.mapping}') || { echo "ERROR: Failed to get releaseplan $(params.releasePlan)"; exit 1; }
+
+        NUM_COMPONENTS=$(jq '.components | length' <<< "$SNAPSHOT_SPEC")
+
+        if [[ $NUM_COMPONENTS == 0 ]]; then
+          echo "No components in snapshot."
+          exit 1
+        fi
+
+        for ((i = 0; i < NUM_COMPONENTS; i++)); do
+          COMPONENT=$(echo -n "$SNAPSHOT_SPEC" | jq -c --argjson i "$i" '.components[$i]')
+          NAME=$(jq -r '.name' <<< "$COMPONENT")
+          COMPONENT_DESTINATION=$(echo -n "$RP_DATA" | jq -c --arg c "$NAME" '.components[] | select(.name == $c)')
+
+          if [[ "$COMPONENT_DESTINATION" == "" ]]; then
+            echo "No mapping for ${NAME}. Skipping."
+            continue
+          fi
+
+          CONTAINER_IMAGE=$(jq -r '.containerImage' <<< "$COMPONENT")
+          REPOSITORIES=$(jq -r '.repository // .repositories[].url' <<< "$COMPONENT_DESTINATION")
+
+          if [[ -z "$REPOSITORIES" ]]; then
+            echo "ERROR: No repository URL found in mapping for component $NAME"
+            exit 1
+          fi
+
+          for REPOSITORY in ${REPOSITORIES}; do
+            git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
+            if jq -e '.repositories' <<< "$COMPONENT_DESTINATION" > /dev/null 2>&1; then
+              repo_tags=$(jq -r --arg repo "$REPOSITORY" \
+                '.repositories[] | select(.url == $repo) | .tags // []' \
+                <<< "$COMPONENT_DESTINATION")
+            else
+              repo_tags=$(jq '.tags // []' <<< "$COMPONENT_DESTINATION")
+            fi
+            all_tags=$(jq -n \
+              --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
+              --argjson t "$repo_tags" \
+              '$d+$t|unique')
+
+            if [[ "$(jq 'length' <<< "$all_tags")" -eq 0 ]]; then
+              echo "ERROR: No tags resolved for component $NAME in repository $REPOSITORY"
+              exit 1
+            fi
+
+            IFS=$'\n'
+            for tag in $(jq -r '.[]' <<< "$all_tags"); do
+              if [[ -n "$git_sha" && "$git_sha" != "null" ]]; then
+                tag="${tag//\{\{ git_short_sha \}\}/${git_sha:0:7}}"
+                tag="${tag//\{\{ git_sha \}\}/$git_sha}"
+              elif [[ "$tag" == *"{{ git_sha }}"* || "$tag" == *"{{ git_short_sha }}"* ]]; then
+                echo "ERROR: Tag '$tag' contains git placeholders but source.git.revision is not set for component $NAME"
+                exit 1
+              fi
+              push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$tag"
+            done
+          done
+        done
