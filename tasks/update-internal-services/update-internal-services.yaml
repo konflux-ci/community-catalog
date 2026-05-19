@@ -85,13 +85,6 @@ spec:
           # Add konflux-release-team group to role_binding.yaml
           yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
             "${OVERLAY_PATH}/rbac/role_binding.yaml"
-          # Maintain additional RBAC files that are not in upstream kustomization.yaml
-          {
-            echo "  - view-authenticated-users.yaml"
-            echo "  - release_team_role.yaml"
-            echo "  - release_team_role_binding.yaml"
-            echo "  - signing-sa.yaml"
-          } >> "${OVERLAY_PATH}/rbac/kustomization.yaml"
 
           PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
             "components/internal-services/internal-$(params.deployment)/manager" | head -n 1 | cut -d ':' -f 4)
