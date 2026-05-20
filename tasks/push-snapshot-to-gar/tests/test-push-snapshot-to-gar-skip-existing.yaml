@@ -1,0 +1,23 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-gar-skip-existing
+spec:
+  description: |
+    Run the push-snapshot-to-gar task with source and destination
+    images that have the same SHA hash and check that the task succeeds
+    without copying
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-gar
+      params:
+        - name: releasePlan
+          value: "ns/skip-image"
+        - name: snapshot
+          value: "ns/skip-image"
+        - name: release
+          value: "ns/skip-image-release"
+        - name: wifAudience
+          value: "test-audience"
