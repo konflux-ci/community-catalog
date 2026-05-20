@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -eux
+set -eu
 
 function cosign() {
   if [[ "$1" == "copy" && "$2" == "-f" && "$3" == *":"* && "$4" == *":"* ]]
