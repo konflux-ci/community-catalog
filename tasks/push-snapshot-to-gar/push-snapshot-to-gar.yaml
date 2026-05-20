@@ -34,11 +34,16 @@ spec:
       type: string
       default: gar-wif-config
     - name: wifAudience
-      description: Expected audience claim for the projected service account token, must match the WIF provider's allowed_audiences
+      description: >-
+        Expected audience for the projected SA token,
+        must match the WIF provider allowed_audiences
       type: string
     - name: taskImage
-      description: Image with docker-credential-gcr, cosign, skopeo, oras, jq, kubectl, and select-oci-auth
+      description: >-
+        Image with docker-credential-gcr, cosign, skopeo,
+        oras, jq, kubectl, and select-oci-auth
       type: string
+      # yamllint disable-line rule:line-length
       default: quay.io/redhat-services-prod/gcp-hcp-tenant/gcp-release-utils@sha256:cca965aaf2d67bad3f4949bffe2e920bebae1ad2edd6c95391b5ca96ee7e8242
     - name: skipAttestations
       description: If true, skip copying attestations and signatures
@@ -89,7 +94,9 @@ spec:
           SOURCE_REPO=${CONTAINER_IMAGE%%@sha256:*}
           SOURCE_REGISTRY=${SOURCE_REPO%%/*}
           select-oci-auth "$CONTAINER_IMAGE" | jq -c \
-            '.auths."'"$SOURCE_REPO"'" = .auths."'"$SOURCE_REGISTRY"'" | del(.auths."'"$SOURCE_REGISTRY"'")' > "$SOURCE_AUTH_FILE"
+            '.auths."'"$SOURCE_REPO"'" = .auths."'"$SOURCE_REGISTRY"'"
+            | del(.auths."'"$SOURCE_REGISTRY"'")' \
+            > "$SOURCE_AUTH_FILE"
 
           DEST_AUTH_DIR=$(mktmp -d)
           DEST_REGISTRY=${REPOSITORY%%/*}
@@ -102,7 +109,10 @@ spec:
         AUTHEOF
 
           WIF_ERR=$(mktmp)
-          if ! DOCKER_CONFIG="$DEST_AUTH_DIR" docker-credential-gcr get <<< "https://$DEST_REGISTRY" > /dev/null 2>"$WIF_ERR"; then
+          if ! DOCKER_CONFIG="$DEST_AUTH_DIR" \
+            docker-credential-gcr get \
+            <<< "https://$DEST_REGISTRY" \
+            > /dev/null 2>"$WIF_ERR"; then
             echo "ERROR: WIF authentication to $DEST_REGISTRY failed:"
             cat "$WIF_ERR"
             exit 1
@@ -147,7 +157,8 @@ spec:
 
         IFS='/' read -r RP_NAMESPACE RP_NAME <<< "$(params.releasePlan)"
         RP_DATA=$(kubectl get releaseplan "$RP_NAME" -n "$RP_NAMESPACE" \
-          -o jsonpath='{.spec.data.mapping}') || { echo "ERROR: Failed to get releaseplan $(params.releasePlan)"; exit 1; }
+          -o jsonpath='{.spec.data.mapping}') \
+          || { echo "ERROR: Failed to get releaseplan"; exit 1; }
 
         NUM_COMPONENTS=$(jq '.components | length' <<< "$SNAPSHOT_SPEC")
 
@@ -199,7 +210,8 @@ spec:
                 tag="${tag//\{\{ git_short_sha \}\}/${git_sha:0:7}}"
                 tag="${tag//\{\{ git_sha \}\}/$git_sha}"
               elif [[ "$tag" == *"{{ git_sha }}"* || "$tag" == *"{{ git_short_sha }}"* ]]; then
-                echo "ERROR: Tag '$tag' contains git placeholders but source.git.revision is not set for component $NAME"
+                echo "ERROR: Tag '$tag' has git placeholders" \
+                  "but source.git.revision is not set for $NAME"
                 exit 1
               fi
               push_image "$NAME" "$CONTAINER_IMAGE" "$REPOSITORY" "$tag"

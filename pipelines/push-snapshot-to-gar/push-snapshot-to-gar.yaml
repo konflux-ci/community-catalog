@@ -35,11 +35,16 @@ spec:
       type: string
       default: gar-wif-config
     - name: wifAudience
-      description: Expected audience claim for the projected service account token, must match the WIF provider's allowed_audiences
+      description: >-
+        Expected audience for the projected SA token,
+        must match the WIF provider allowed_audiences
       type: string
     - name: taskImage
-      description: Image with docker-credential-gcr, cosign, skopeo, oras, jq, kubectl, and select-oci-auth
+      description: >-
+        Image with docker-credential-gcr, cosign, skopeo,
+        oras, jq, kubectl, and select-oci-auth
       type: string
+      # yamllint disable-line rule:line-length
       default: quay.io/redhat-services-prod/gcp-hcp-tenant/gcp-release-utils@sha256:cca965aaf2d67bad3f4949bffe2e920bebae1ad2edd6c95391b5ca96ee7e8242
     - name: skipAttestations
       description: If true, skip copying attestations and signatures
