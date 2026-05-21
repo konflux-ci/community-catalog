@@ -170,7 +170,7 @@ spec:
                 METADATA_REPO=${CONTAINER_IMAGE%%@sha256:*}
                 METADATA_REGISTRY=${METADATA_REPO%%/*}
                 select-oci-auth "$CONTAINER_IMAGE" | jq -c \
-                  '.auths."'"$METADATA_REPO"'" = .auths."'"$METADATA_REGISTRY"'" | \
+                  '.auths."'"$METADATA_REPO"'" = .auths."'"$METADATA_REGISTRY"'" |
                   del(.auths."'"$METADATA_REGISTRY"'")' \
                   > "$METADATA_AUTH_FILE"
                 cp "$METADATA_AUTH_FILE" "$METADATA_DOCKER_CONFIG"/config.json
