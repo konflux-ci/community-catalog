@@ -163,11 +163,26 @@ spec:
               # If tag needs image metadata, do inspection for all templating
               if [[ "$tag" == *"{{ timestamp }}"* || "$tag" == *"{{ release_timestamp }}"* || \
                     "$tag" == *"{{ labels."* ]]; then
-                aj="$(get-image-architectures "$CONTAINER_IMAGE")"
-                im="$(skopeo inspect --retry-times 3 --no-tags \
+                # Use a pre-selected auth file to avoid ambiguous credential resolution
+                # from merged registry auth in environments with overlapping quay.io entries.
+                METADATA_AUTH_FILE=$(mktemp)
+                METADATA_DOCKER_CONFIG=$(mktemp -d)
+                METADATA_REPO=${CONTAINER_IMAGE%%@sha256:*}
+                METADATA_REGISTRY=${METADATA_REPO%%/*}
+                select-oci-auth "$CONTAINER_IMAGE" | jq -c \
+                  '.auths."'"$METADATA_REPO"'" = .auths."'"$METADATA_REGISTRY"'" |
+                  del(.auths."'"$METADATA_REGISTRY"'")' \
+                  > "$METADATA_AUTH_FILE"
+                cp "$METADATA_AUTH_FILE" "$METADATA_DOCKER_CONFIG"/config.json
+
+                aj="$(DOCKER_CONFIG="$METADATA_DOCKER_CONFIG" get-image-architectures "$CONTAINER_IMAGE")"
+                im="$(DOCKER_CONFIG="$METADATA_DOCKER_CONFIG" \
+                  skopeo inspect --authfile "$METADATA_AUTH_FILE" --retry-times 3 --no-tags \
                   --override-os "$(jq -rs 'map(.platform.os)|.[0]' <<< "$aj")" \
                   --override-arch "$(jq -rs 'map(.platform.architecture)|.[0]' <<< "$aj")" \
                   docker://"$CONTAINER_IMAGE"|jq -c)"
+                rm -f "$METADATA_AUTH_FILE"
+                rm -rf "$METADATA_DOCKER_CONFIG"
                 tf=$(jq -r --arg d "$(jq -r '.defaults.timestampFormat//"%s"' <<< "$RP_DATA")" \
                   '.timestampFormat//$d' <<< "$COMPONENT_DESTINATION")
                 # Apply all templating using the image metadata
