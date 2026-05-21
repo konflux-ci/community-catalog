@@ -1,0 +1,37 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-aws-oidc-auth-no-leak
+spec:
+  description: |
+    Run the aws-oidc-auth task and verify that the OIDC token is not
+    accessible from the run step.
+  tasks:
+    - name: run-task
+      taskRef:
+        name: aws-oidc-auth
+      params:
+        - name: roleArn
+          value: "arn:aws:iam::123456789012:role/test-role"
+        - name: region
+          value: "us-east-1"
+        - name: script
+          value: |
+            # Verify the OIDC token volume is NOT mounted in the run step
+            if [ -f "/var/run/secrets/oidc/token" ]; then
+              echo "ERROR: OIDC token is accessible in run step" >&2
+              exit 1
+            fi
+
+            # Verify credentials file IS accessible
+            test -f "${AWS_SHARED_CREDENTIALS_FILE}"
+
+            # Verify the credentials volume is mounted read-only by
+            # attempting to write and confirming failure
+            if echo "test" > /var/run/secrets/aws/test-write 2>/dev/null; then
+              echo "ERROR: credentials volume is writable in run step" >&2
+              exit 1
+            fi
+
+            echo "No leak checks passed."
