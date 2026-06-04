@@ -73,10 +73,12 @@ function kubectl() {
     elif [[ "$3" == "multiple" ]]; then
       MAPPING='{
         "components": [
-          {"name": "test-image", "repository": "us-docker.pkg.dev/my-project/my-repo/test-image",
-           "tags": ["testtag"]},
-          {"name": "test-image2", "repository": "us-docker.pkg.dev/my-project/my-repo/test-image2",
-           "tags": ["testtag", "testtag2"]}
+          {"name": "test-image",
+           "repositories": [{"url": "us-docker.pkg.dev/my-project/my-repo/test-image",
+           "tags": ["testtag"]}]},
+          {"name": "test-image2",
+           "repositories": [{"url": "us-docker.pkg.dev/my-project/my-repo/test-image2",
+           "tags": ["testtag", "testtag2"]}]}
         ]
       }'
       if [[ "$*" == *"jsonpath={.spec.data.mapping}"* ]]; then
@@ -88,8 +90,24 @@ function kubectl() {
     elif [[ "$3" == "templating" ]]; then
       MAPPING='{
         "components": [
-          {"name": "test-image", "repository": "us-docker.pkg.dev/my-project/my-repo/test-image",
-           "tags": ["{{ git_sha }}", "{{ git_short_sha }}", "latest"]}
+          {"name": "test-image",
+           "repositories": [{"url": "us-docker.pkg.dev/my-project/my-repo/test-image",
+           "tags": ["{{ git_sha }}", "{{ git_short_sha }}", "latest"]}]}
+        ]
+      }'
+      if [[ "$*" == *"jsonpath={.spec.data.mapping}"* ]]; then
+        echo "$MAPPING"
+      else
+        echo "{\"spec\":{\"data\":{\"mapping\":$MAPPING}}}"
+      fi
+      return
+    elif [[ "$3" == "componenttags" ]]; then
+      MAPPING='{
+        "components": [
+          {"name": "test-image",
+           "componentTags": ["comp-tag"],
+           "repositories": [{"url": "us-docker.pkg.dev/my-project/my-repo/test-image",
+           "tags": ["repo-tag"]}]}
         ]
       }'
       if [[ "$*" == *"jsonpath={.spec.data.mapping}"* ]]; then
@@ -102,7 +120,7 @@ function kubectl() {
       DEST_REPO="us-docker.pkg.dev/my-project/my-repo/default-image"
     fi
 
-    MAPPING="{\"components\":[{\"name\":\"test-image\",\"repository\":\"$DEST_REPO\",\"tags\":[\"testtag\"]}]}"
+    MAPPING="{\"components\":[{\"name\":\"test-image\",\"repositories\":[{\"url\":\"$DEST_REPO\",\"tags\":[\"testtag\"]}]}]}"
 
     if [[ "$*" == *"jsonpath={.spec.data.mapping}"* ]]; then
       echo "$MAPPING"

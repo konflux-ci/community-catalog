@@ -178,7 +178,7 @@ spec:
           fi
 
           CONTAINER_IMAGE=$(jq -r '.containerImage' <<< "$COMPONENT")
-          REPOSITORIES=$(jq -r '.repository // .repositories[].url' <<< "$COMPONENT_DESTINATION")
+          REPOSITORIES=$(jq -r '.repositories[].url' <<< "$COMPONENT_DESTINATION")
 
           if [[ -z "$REPOSITORIES" ]]; then
             echo "ERROR: No repository URL found in mapping for component $NAME"
@@ -187,17 +187,17 @@ spec:
 
           for REPOSITORY in ${REPOSITORIES}; do
             git_sha=$(jq -r '.source.git.revision // ""' <<< "$COMPONENT")
-            if jq -e '.repositories' <<< "$COMPONENT_DESTINATION" > /dev/null 2>&1; then
-              repo_tags=$(jq -r --arg repo "$REPOSITORY" \
-                '.repositories[] | select(.url == $repo) | .tags // []' \
-                <<< "$COMPONENT_DESTINATION")
-            else
-              repo_tags=$(jq '.tags // []' <<< "$COMPONENT_DESTINATION")
-            fi
+            repo_tags=$(jq -r --arg repo "$REPOSITORY" \
+              '.repositories[] | select(.url == $repo) | .tags // []' \
+              <<< "$COMPONENT_DESTINATION")
+            comp_tags=$(jq --arg n "$NAME" \
+              '.components[] | select(.name == $n) | .componentTags // []' \
+              <<< "$RP_DATA")
             all_tags=$(jq -n \
               --argjson d "$(jq '.defaults.tags//[]' <<< "$RP_DATA")" \
+              --argjson c "$comp_tags" \
               --argjson t "$repo_tags" \
-              '$d+$t|unique')
+              '$d+$c+$t|unique')
 
             if [[ "$(jq 'length' <<< "$all_tags")" -eq 0 ]]; then
               echo "ERROR: No tags resolved for component $NAME in repository $REPOSITORY"
