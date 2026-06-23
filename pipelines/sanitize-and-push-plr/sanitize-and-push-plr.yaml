@@ -1,0 +1,318 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: sanitize-and-push-plr
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: release
+spec:
+  description: |-
+    Final release pipeline that sanitizes a build PipelineRun and pushes it as
+    an OCI artifact to a Quay repository so it can be reused by downstream
+    consumers without triggering a full rebuild.
+  params:
+    - name: release
+      type: string
+      description: >-
+        The namespaced name (namespace/name) of the Release custom resource
+    - name: snapshot
+      type: string
+      description: >-
+        The namespaced name (namespace/name) of the Snapshot
+    - name: releasePlan
+      type: string
+      description: >-
+        The namespaced name (namespace/name) of the ReleasePlan
+    - name: componentName
+      type: string
+      description: >-
+        The Konflux component name, used to find the source build PipelineRun
+        and to prefix the OCI artifact tags
+    - name: ociArtifactRepo
+      type: string
+      description: >-
+        Quay repository to push the sanitized PipelineRun OCI artifact to.
+        Two tags are pushed: <componentName>-latest and
+        <componentName>-YYYYMMDD-HHMMSS
+    - name: ociArtifactSecret
+      type: string
+      description: >-
+        Name of the kubernetes.io/dockerconfigjson Secret in the tenant namespace
+        with push credentials for the target Quay repository. The auth key must
+        be quay.io, not the full repository path.
+    - name: releasedImageRepo
+      type: string
+      description: >-
+        The repository where the managed release pipeline pushed the container
+        image (e.g. quay.io/my-org/my-image). Used to construct the IMAGE_URL
+        value written into the sanitized PipelineRun. Defaults to ociArtifactRepo
+        if left empty, which is correct when both point to the same repository.
+      default: ""
+  tasks:
+    - name: sanitize-and-push-plr
+      params:
+        - name: snapshot
+          value: $(params.snapshot)
+        - name: componentName
+          value: $(params.componentName)
+        - name: ociArtifactRepo
+          value: $(params.ociArtifactRepo)
+        - name: ociArtifactSecret
+          value: $(params.ociArtifactSecret)
+        - name: releasedImageRepo
+          value: $(params.releasedImageRepo)
+      taskSpec:
+        params:
+          - name: snapshot
+            type: string
+          - name: componentName
+            type: string
+          - name: ociArtifactRepo
+            type: string
+          - name: ociArtifactSecret
+            type: string
+          - name: releasedImageRepo
+            type: string
+        volumes:
+          - name: workdir
+            emptyDir: {}
+          - name: oci-artifact-creds
+            secret:
+              secretName: $(params.ociArtifactSecret)
+        steps:
+          - name: sanitize
+            image: quay.io/konflux-ci/appstudio-utils:latest
+            volumeMounts:
+              - name: workdir
+                mountPath: /workdir
+            env:
+              - name: SNAPSHOT
+                value: $(params.snapshot)
+              - name: COMPONENT_NAME
+                value: $(params.componentName)
+              - name: OCI_ARTIFACT_REPO
+                value: $(params.ociArtifactRepo)
+              - name: RELEASED_IMAGE_REPO
+                value: $(params.releasedImageRepo)
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              SNAPSHOT_NAMESPACE=$(echo "${SNAPSHOT}" | cut -d/ -f1)
+              SNAPSHOT_NAME=$(echo "${SNAPSHOT}" | cut -d/ -f2)
+
+              echo "=== Looking up Snapshot ${SNAPSHOT_NAME} in ${SNAPSHOT_NAMESPACE} ==="
+              SNAPSHOT_JSON=$(kubectl get snapshot "${SNAPSHOT_NAME}" \
+                -n "${SNAPSHOT_NAMESPACE}" -o json)
+
+              RELEASED_DIGEST=$(echo "${SNAPSHOT_JSON}" \
+                | jq -r --arg comp "${COMPONENT_NAME}" '
+                    .spec.components[]
+                    | select(.name == $comp)
+                    | .containerImage
+                    | split("@")[-1]')
+
+              if [[ -z "${RELEASED_DIGEST}" || "${RELEASED_DIGEST}" == "null" ]]; then
+                echo "ERROR: Could not find image digest for component ${COMPONENT_NAME}" >&2
+                echo "Snapshot: ${SNAPSHOT_NAME}" >&2
+                exit 1
+              fi
+              echo "Released digest: ${RELEASED_DIGEST}"
+
+              IMAGE_REPO="${RELEASED_IMAGE_REPO:-${OCI_ARTIFACT_REPO}}"
+              RELEASED_IMAGE_URL="${IMAGE_REPO}:latest"
+              echo "Released IMAGE_URL: ${RELEASED_IMAGE_URL}"
+
+              echo "=== Finding source build PipelineRun ==="
+              PLR_NAME=$(echo "${SNAPSHOT_JSON}" \
+                | jq -r '.metadata.annotations["appstudio.openshift.io/snapshot-source-pipelinerun"] // empty')
+
+              if [[ -z "${PLR_NAME}" ]]; then
+                echo "WARNING: No snapshot-source-pipelinerun annotation. Falling back to label + finalizer search..."
+                PLR_NAME=$(kubectl get pipelinerun -n "${SNAPSHOT_NAMESPACE}" \
+                  -l "appstudio.openshift.io/component=${COMPONENT_NAME}" \
+                  -l "pipelines.appstudio.openshift.io/type=build" \
+                  -o json | jq -r '
+                    [.items[] | select(
+                      .metadata.finalizers[]? == "test.appstudio.openshift.io/pipelinerun"
+                    )]
+                    | sort_by(.metadata.creationTimestamp)
+                    | .[-1].metadata.name // empty')
+              fi
+
+              if [[ -z "${PLR_NAME}" || "${PLR_NAME}" == "null" ]]; then
+                echo "ERROR: Could not find a build PipelineRun for component ${COMPONENT_NAME}" >&2
+                echo "Ensure the build push pipeline adds finalizer test.appstudio.openshift.io/pipelinerun" >&2
+                exit 1
+              fi
+              echo "Source PipelineRun: ${PLR_NAME}"
+
+              echo "=== Sanitizing PipelineRun ==="
+              kubectl get pipelinerun -n "${SNAPSHOT_NAMESPACE}" "${PLR_NAME}" -o json \
+                | jq \
+                    --arg imageUrl "${RELEASED_IMAGE_URL}" \
+                    --arg imageDigest "${RELEASED_DIGEST}" '
+                    del(
+                      .metadata.uid,
+                      .metadata.resourceVersion,
+                      .metadata.generation,
+                      .metadata.creationTimestamp,
+                      .metadata.managedFields,
+                      .metadata.ownerReferences,
+                      .metadata.finalizers
+                    )
+                    | .metadata.labels = (
+                        (.metadata.labels // {})
+                        | with_entries(
+                            select(.key | test(
+                              "^test\\.appstudio\\.openshift\\.io/"
+                              + "|^pac\\.test\\.appstudio\\.openshift\\.io/"
+                              + "|^pipelinesascode\\.tekton\\.dev/"
+                            ) | not)
+                          )
+                      )
+                    | del(
+                        .metadata.labels."appstudio.openshift.io/snapshot",
+                        .metadata.labels."build.appstudio.redhat.com/pipeline",
+                        .metadata.labels."tekton.dev/pipeline"
+                      )
+                    | .metadata.annotations = (
+                        (.metadata.annotations // {})
+                        | with_entries(
+                            select(.key | test(
+                              "^test\\.appstudio\\.openshift\\.io/"
+                              + "|^pac\\.test\\.appstudio\\.openshift\\.io/"
+                              + "|^pipelinesascode\\.tekton\\.dev/"
+                            ) | not)
+                          )
+                      )
+                    | del(
+                        .status.startTime,
+                        .status.completionTime,
+                        .status.childReferences,
+                        .status.taskRuns,
+                        .status.runs,
+                        .status.pipelineResults
+                      )
+                    | .status.results = (
+                        (.status.results // [])
+                        | map(
+                            if .name == "IMAGE_URL" then . + {"value": $imageUrl}
+                            elif .name == "IMAGE_DIGEST" then . + {"value": $imageDigest}
+                            else .
+                            end
+                          )
+                      )
+                  ' \
+                > /workdir/sanitized-pipelinerun.json
+
+              echo "Sanitized JSON written ($(wc -c < /workdir/sanitized-pipelinerun.json) bytes)"
+              echo "Verifying IMAGE_URL and IMAGE_DIGEST:"
+              jq '[.status.results[]? | select(.name == "IMAGE_URL" or .name == "IMAGE_DIGEST")]' \
+                /workdir/sanitized-pipelinerun.json
+
+          - name: push-oci-artifact
+            image: ghcr.io/oras-project/oras:v1.2.0
+            volumeMounts:
+              - name: workdir
+                mountPath: /workdir
+              - name: oci-artifact-creds
+                mountPath: /workspace/oci-artifact-creds
+                readOnly: true
+            env:
+              - name: OCI_ARTIFACT_REPO
+                value: $(params.ociArtifactRepo)
+              - name: COMPONENT_NAME
+                value: $(params.componentName)
+            script: |
+              #!/bin/sh
+              set -eu
+
+              cd /workdir
+              DATETIME_TAG="${COMPONENT_NAME}-$(date +%Y%m%d-%H%M%S)"
+              LATEST_TAG="${COMPONENT_NAME}-latest"
+
+              push_tag() {
+                TAG="${1}"
+                echo "=== Pushing ${OCI_ARTIFACT_REPO}:${TAG} ==="
+                oras push \
+                  --registry-config /workspace/oci-artifact-creds/.dockerconfigjson \
+                  --artifact-type application/vnd.appstudio.pipelinerun+json \
+                  "${OCI_ARTIFACT_REPO}:${TAG}" \
+                  sanitized-pipelinerun.json:application/json
+              }
+
+              push_tag "${LATEST_TAG}"
+              push_tag "${DATETIME_TAG}"
+
+              echo "OCI artifact pushed as :${LATEST_TAG} and :${DATETIME_TAG}"
+
+  finally:
+    - name: remove-finalizer
+      when:
+        - input: $(tasks.sanitize-and-push-plr.status)
+          operator: in
+          values:
+            - Succeeded
+      params:
+        - name: snapshot
+          value: $(params.snapshot)
+        - name: componentName
+          value: $(params.componentName)
+      taskSpec:
+        params:
+          - name: snapshot
+            type: string
+          - name: componentName
+            type: string
+        steps:
+          - name: patch
+            image: quay.io/konflux-ci/appstudio-utils:latest
+            env:
+              - name: SNAPSHOT
+                value: $(params.snapshot)
+              - name: COMPONENT_NAME
+                value: $(params.componentName)
+            script: |
+              #!/usr/bin/env bash
+              set -euo pipefail
+
+              SNAPSHOT_NAMESPACE=$(echo "${SNAPSHOT}" | cut -d/ -f1)
+              SNAPSHOT_NAME=$(echo "${SNAPSHOT}" | cut -d/ -f2)
+
+              PLR_NAME=$(kubectl get snapshot "${SNAPSHOT_NAME}" \
+                -n "${SNAPSHOT_NAMESPACE}" \
+                -o jsonpath='{.metadata.annotations.appstudio\.openshift\.io/snapshot-source-pipelinerun}' \
+                2>/dev/null || true)
+
+              if [[ -z "${PLR_NAME}" ]]; then
+                echo "WARNING: No annotation on Snapshot ${SNAPSHOT_NAME}. Falling back to label + finalizer search..."
+                PLR_NAME=$(kubectl get pipelinerun -n "${SNAPSHOT_NAMESPACE}" \
+                  -l "appstudio.openshift.io/component=${COMPONENT_NAME}" \
+                  -l "pipelines.appstudio.openshift.io/type=build" \
+                  -o json | jq -r '
+                    [.items[] | select(
+                      .metadata.finalizers[]? == "test.appstudio.openshift.io/pipelinerun"
+                    )]
+                    | sort_by(.metadata.creationTimestamp)
+                    | .[-1].metadata.name // empty')
+              fi
+
+              if [[ -z "${PLR_NAME}" || "${PLR_NAME}" == "null" ]]; then
+                echo "WARNING: Could not find PipelineRun to remove finalizer from. Skipping."
+                exit 0
+              fi
+
+              echo "Removing finalizer from PipelineRun ${PLR_NAME} in ${SNAPSHOT_NAMESPACE}..."
+              FINALIZERS=$(kubectl get pipelinerun "${PLR_NAME}" \
+                -n "${SNAPSHOT_NAMESPACE}" \
+                -o json | jq -c \
+                  '[.metadata.finalizers[]? | select(. != "test.appstudio.openshift.io/pipelinerun")]')
+
+              kubectl patch pipelinerun "${PLR_NAME}" \
+                -n "${SNAPSHOT_NAMESPACE}" \
+                --type=merge \
+                -p "{\"metadata\":{\"finalizers\":${FINALIZERS}}}" \
+                && echo "Finalizer removed." \
+                || echo "PipelineRun gone or patch failed; skipping."
