@@ -1,0 +1,24 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-gar-skip-attestations-true
+spec:
+  description: |
+    Run the push-snapshot-to-gar task with skipAttestations=true
+    and check that skopeo copy is used instead of cosign copy
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-gar
+      params:
+        - name: releasePlan
+          value: "ns/releasePlan"
+        - name: snapshot
+          value: "ns/snapshot"
+        - name: release
+          value: "ns/snapshot-release"
+        - name: wifAudience
+          value: "test-audience"
+        - name: skipAttestations
+          value: "true"

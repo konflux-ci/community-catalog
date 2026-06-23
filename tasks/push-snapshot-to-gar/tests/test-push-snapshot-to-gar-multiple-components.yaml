@@ -1,0 +1,22 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-push-snapshot-to-gar-multiple-components
+spec:
+  description: |
+    Run the push-snapshot-to-gar task with multiple components
+    in the snapshot and check that the task succeeds
+  tasks:
+    - name: run-task
+      taskRef:
+        name: push-snapshot-to-gar
+      params:
+        - name: releasePlan
+          value: "ns/multiple"
+        - name: snapshot
+          value: "ns/multiple"
+        - name: release
+          value: "ns/multiple-release"
+        - name: wifAudience
+          value: "test-audience"

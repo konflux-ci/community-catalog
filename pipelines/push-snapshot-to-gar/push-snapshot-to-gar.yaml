@@ -1,0 +1,78 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: push-snapshot-to-gar
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+spec:
+  description: |-
+    Push snapshot images to Google Artifact Registry using cosign copy.
+    Authenticates to GAR via Workload Identity Federation (WIF) using
+    docker-credential-gcr as a Docker credential helper.
+
+    The destination for each image is taken from the '.spec.data.mapping'
+    section of the release plan.
+  params:
+    - name: release
+      description: Namespaced name of release (namespace/name)
+      type: string
+    - name: releasePlan
+      description: Namespaced name of release plan (namespace/name)
+      type: string
+    - name: snapshot
+      description: Namespaced name of snapshot (namespace/name)
+      type: string
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+    - name: wifConfigMapName
+      description: Name of the ConfigMap containing GCP WIF credential configuration JSON
+      type: string
+      default: gar-wif-config
+    - name: wifAudience
+      description: >-
+        Expected audience for the projected SA token,
+        must match the WIF provider allowed_audiences
+      type: string
+    - name: taskImage
+      description: >-
+        Image with docker-credential-gcr, cosign, skopeo,
+        oras, jq, kubectl, and select-oci-auth
+      type: string
+      # yamllint disable-line rule:line-length
+      default: quay.io/redhat-services-prod/gcp-hcp-tenant/gcp-release-utils@sha256:cca965aaf2d67bad3f4949bffe2e920bebae1ad2edd6c95391b5ca96ee7e8242
+    - name: skipAttestations
+      description: If true, skip copying attestations and signatures
+      type: string
+      default: "false"
+  tasks:
+    - name: push-snapshot-to-gar
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/push-snapshot-to-gar/push-snapshot-to-gar.yaml
+      params:
+        - name: snapshot
+          value: $(params.snapshot)
+        - name: releasePlan
+          value: $(params.releasePlan)
+        - name: release
+          value: $(params.release)
+        - name: wifConfigMapName
+          value: $(params.wifConfigMapName)
+        - name: wifAudience
+          value: $(params.wifAudience)
+        - name: taskImage
+          value: $(params.taskImage)
+        - name: skipAttestations
+          value: $(params.skipAttestations)
