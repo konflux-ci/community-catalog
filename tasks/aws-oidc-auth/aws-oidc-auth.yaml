@@ -1,0 +1,74 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: aws-oidc-auth
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+    tekton.dev/tags: "aws, oidc, authentication"
+spec:
+  description: |-
+    Authenticates to AWS using OIDC workload identity federation.
+    Uses the pipeline ServiceAccount's projected token to call AWS STS
+    AssumeRoleWithWebIdentity directly. No broker or static credentials required.
+
+    Temporary credentials are written to an in-memory volume shared
+    between steps. They are never exposed via Task results or logs.
+
+    This Task wraps the aws-oidc-auth StepAction from this repository.
+  params:
+    - name: roleArn
+      description: ARN of the IAM role to assume.
+    - name: region
+      description: AWS region for STS endpoint.
+      default: us-east-1
+    - name: sessionDuration
+      description: Duration in seconds for temporary credentials (900-43200).
+      default: "900"
+    - name: image
+      description: Container image for the run step.
+      default: registry.access.redhat.com/ubi9-minimal:latest
+    - name: script
+      description: |-
+        Script to execute with AWS credentials available.
+        AWS_SHARED_CREDENTIALS_FILE and AWS_DEFAULT_REGION are pre-configured.
+      default: "echo 'AWS credentials available. Override this param with your script.'"
+  volumes:
+    - name: oidc-token
+      projected:
+        sources:
+          - serviceAccountToken:
+              audience: sts.amazonaws.com
+              expirationSeconds: 3600
+              path: token
+    - name: aws-credentials
+      emptyDir:
+        medium: Memory
+        sizeLimit: 1Mi
+  steps:
+    - name: authenticate
+      ref:
+        name: aws-oidc-auth
+      params:
+        - name: roleArn
+          value: $(params.roleArn)
+        - name: region
+          value: $(params.region)
+        - name: sessionDuration
+          value: $(params.sessionDuration)
+    - name: run
+      image: $(params.image)
+      volumeMounts:
+        - name: aws-credentials
+          mountPath: /var/run/secrets/aws
+          readOnly: true
+      env:
+        - name: AWS_SHARED_CREDENTIALS_FILE
+          value: /var/run/secrets/aws/credentials
+        - name: AWS_DEFAULT_REGION
+          value: $(params.region)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+        # shellcheck disable=SC2091
+        $(params.script)
