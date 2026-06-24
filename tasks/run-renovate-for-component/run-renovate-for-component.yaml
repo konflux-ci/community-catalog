@@ -1,0 +1,99 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: run-renovate-for-component
+spec:
+  description: >-
+    This Task runs Renovate directly to create a pull request that updates
+    a component's image digest in a git repository.
+  params:
+    - name: git-repository-url
+      description: The full Git repository URL to update (e.g., https://github.com/org/repo.git).
+      type: string
+    - name: git-token-secret-name
+      description: The name of the Kubernetes secret containing the Git hosting service token.
+      type: string
+    - name: git-token-secret-key
+      description: The key within the git-token-secret-name that holds the token value.
+      type: string
+      default: token
+    - name: image-name
+      description: The name of the container image to update (e.g., quay.io/my-org/my-app).
+      type: string
+    - name: new-digest
+      description: The new image digest to update to (e.g., sha256:abcdef...).
+      type: string
+    - name: file-match
+      description: A regex string to match files that should be scanned by Renovate.
+      type: string
+      default: "(^|/)Dockerfile$"
+    - name: match-strings
+      description: >-
+        A regex string with a capture group to find the exact image declaration line to be replaced.
+        Example: "FROM quay.io/my-org/my-app(@sha256:[a-f0-9]+|:[\\w.-]+)"
+      type: string
+  workspaces:
+    - name: shared-workspace
+      description: A workspace for renovate to clone the repo and store logs.
+  steps:
+    - name: run-renovate
+      image: renovate/renovate:41-full
+      workingDir: $(workspaces.shared-workspace.path)
+      securityContext:
+        capabilities:
+          drop:
+            - ALL
+        runAsNonRoot: true
+        allowPrivilegeEscalation: false
+        seccompProfile:
+          type: RuntimeDefault
+      env:
+        - name: RENOVATE_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: $(params.git-token-secret-name)
+              key: $(params.git-token-secret-key)
+        - name: LOG_LEVEL
+          value: "debug"
+      script: |
+        #!/usr/bin/env bash
+        set -ex
+
+        REPO_PATH=$(echo "$(params.git-repository-url)" | sed -E 's/https?:\/\/[^\/]+\///' | sed 's/\.git$//')
+
+        # Create a dynamic renovate.json config file.
+        # This config instructs renovate to perform one specific update.
+        cat > renovate.json <<EOF
+        {
+          "platform": "github",
+          "onboarding": false,
+          "requireConfig": "ignored",
+          "repositories": ["\${REPO_PATH}"],
+          "regexManagers": [
+            {
+              "fileMatch": ["$(params.file-match)"],
+              "matchStrings": ["$(params.match-strings)"],
+              "depNameTemplate": "$(params.image-name)",
+              "datasourceTemplate": "docker"
+            }
+          ],
+          "packageRules": [
+            {
+              "matchDatasources": ["docker"],
+              "matchDepNames": ["$(params.image-name)"],
+              "versioning": "digest",
+              "newVersion": "$(params.new-digest)",
+              "recreateWhen": "always"
+            }
+          ],
+          "prHourlyLimit": 0,
+          "prConcurrentLimit": 0
+        }
+        EOF
+
+        echo "--- Generated renovate.json ---"
+        cat renovate.json
+        echo "------------------------------------"
+
+        # Execute renovate with the generated config.
+        renovate --token="\${RENOVATE_TOKEN}" --config-file=renovate.json
