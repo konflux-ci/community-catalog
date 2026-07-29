@@ -49,6 +49,12 @@ spec:
         value written into the sanitized PipelineRun. Defaults to ociArtifactRepo
         if left empty, which is correct when both point to the same repository.
       default: ""
+    - name: finalizer
+      type: string
+      description: >-
+        The finalizer that was set on the pipelineRun to prevent it being pruned before
+        it is sanitized and pushed.
+      default: "test.appstudio.openshift.io/sanitize-pipelinerun"
   tasks:
     - name: sanitize-and-push-plr
       params:
@@ -62,6 +68,8 @@ spec:
           value: $(params.ociArtifactSecret)
         - name: releasedImageRepo
           value: $(params.releasedImageRepo)
+        - name: finalizer
+          value: $(params.finalizer)
       taskSpec:
         params:
           - name: snapshot
@@ -73,6 +81,8 @@ spec:
           - name: ociArtifactSecret
             type: string
           - name: releasedImageRepo
+            type: string
+          - name: finalizer
             type: string
         volumes:
           - name: workdir
@@ -95,6 +105,8 @@ spec:
                 value: $(params.ociArtifactRepo)
               - name: RELEASED_IMAGE_REPO
                 value: $(params.releasedImageRepo)
+              - name: FINALIZER
+                value: $(params.finalizer)
             script: |
               #!/usr/bin/env bash
               set -euo pipefail
@@ -133,9 +145,9 @@ spec:
                 PLR_NAME=$(kubectl get pipelinerun -n "${SNAPSHOT_NAMESPACE}" \
                   -l "appstudio.openshift.io/component=${COMPONENT_NAME}" \
                   -l "pipelines.appstudio.openshift.io/type=build" \
-                  -o json | jq -r '
+                  -o json | jq -r --arg finalizer "${FINALIZER}" '
                     [.items[] | select(
-                      .metadata.finalizers[]? == "test.appstudio.openshift.io/pipelinerun"
+                      .metadata.finalizers[]? == $finalizer
                     )]
                     | sort_by(.metadata.creationTimestamp)
                     | .[-1].metadata.name // empty')
@@ -143,7 +155,7 @@ spec:
 
               if [[ -z "${PLR_NAME}" || "${PLR_NAME}" == "null" ]]; then
                 echo "ERROR: Could not find a build PipelineRun for component ${COMPONENT_NAME}" >&2
-                echo "Ensure the build push pipeline adds finalizer test.appstudio.openshift.io/pipelinerun" >&2
+                echo "Ensure the build push pipeline adds finalizer ${FINALIZER}" >&2
                 exit 1
               fi
               echo "Source PipelineRun: ${PLR_NAME}"
@@ -260,11 +272,15 @@ spec:
           value: $(params.snapshot)
         - name: componentName
           value: $(params.componentName)
+        - name: finalizer
+          value: $(params.finalizer)
       taskSpec:
         params:
           - name: snapshot
             type: string
           - name: componentName
+            type: string
+          - name: finalizer
             type: string
         steps:
           - name: patch
@@ -274,6 +290,8 @@ spec:
                 value: $(params.snapshot)
               - name: COMPONENT_NAME
                 value: $(params.componentName)
+              - name: FINALIZER
+                value: $(params.finalizer)
             script: |
               #!/usr/bin/env bash
               set -euo pipefail
@@ -292,9 +310,9 @@ spec:
                 PLR_NAME=$(kubectl get pipelinerun -n "${SNAPSHOT_NAMESPACE}" \
                   -l "appstudio.openshift.io/component=${COMPONENT_NAME}" \
                   -l "pipelines.appstudio.openshift.io/type=build" \
-                  -o json | jq -r '
+                  -o json | jq -r --arg finalizer "${FINALIZER}" '
                     [.items[] | select(
-                      .metadata.finalizers[]? == "test.appstudio.openshift.io/pipelinerun"
+                      .metadata.finalizers[]? == $finalizer
                     )]
                     | sort_by(.metadata.creationTimestamp)
                     | .[-1].metadata.name // empty')
@@ -306,14 +324,14 @@ spec:
               fi
 
               echo "Removing finalizer from PipelineRun ${PLR_NAME} in ${SNAPSHOT_NAMESPACE}..."
-              FINALIZERS=$(kubectl get pipelinerun "${PLR_NAME}" \
+              finalizers=$(kubectl get pipelinerun "${PLR_NAME}" \
                 -n "${SNAPSHOT_NAMESPACE}" \
-                -o json | jq -c \
-                  '[.metadata.finalizers[]? | select(. != "test.appstudio.openshift.io/pipelinerun")]')
+                -o json | jq -c --arg finalizer "${FINALIZER}" \
+                  '[.metadata.finalizers[]? | select(. != $finalizer)]')
 
               kubectl patch pipelinerun "${PLR_NAME}" \
                 -n "${SNAPSHOT_NAMESPACE}" \
                 --type=merge \
-                -p "{\"metadata\":{\"finalizers\":${FINALIZERS}}}" \
+                -p "{\"metadata\":{\"finalizers\":${finalizers}}}" \
                 && echo "Finalizer removed." \
                 || echo "PipelineRun gone or patch failed; skipping."
