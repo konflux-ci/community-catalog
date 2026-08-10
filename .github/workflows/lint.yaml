@@ -8,14 +8,14 @@ jobs:
   yamllint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: Run yamllint
-        uses: frenck/action-yamllint@v1
+        uses: frenck/action-yamllint@e3e8cdef144eeb914883bd3c77f0333227140ffc  # v1
   tknparse:
     runs-on: ubuntu-latest
     steps:
       - name: checkout files
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
       - name: install tkn
         uses: ./.github/actions/install-tkn
       - name: Get changed files
@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
@@ -53,12 +53,12 @@ jobs:
     steps:
       - name: Checkout Repository
       # Differential Checkton requires full git history
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
         with:
           fetch-depth: 0
       - name: Run Checkton
         id: checkton
-        uses: chmeliik/checkton@v0.2.2
+        uses: chmeliik/checkton@c234c6866c5cfb5e3dc9ccdcc049e59053cc9048  # v0.2.2
         # Migrating to the konflux-ci org
         with:
           fail-on-findings: true
