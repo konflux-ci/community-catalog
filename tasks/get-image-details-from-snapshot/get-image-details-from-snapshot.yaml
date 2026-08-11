@@ -1,0 +1,35 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: get-image-details-from-snapshot
+spec:
+  description: >-
+    This task retrieves a component's full container image string from a
+    Snapshot and splits it into the image URL and digest for downstream tasks.
+  params:
+    - name: snapshot-name
+      description: The name of the Snapshot resource.
+    - name: component-name
+      description: The name of the component within the Snapshot.
+    - name: namespace
+      description: The namespace where the Snapshot exists.
+  results:
+    - name: image-url
+      description: The URL of the container image without the tag or digest.
+    - name: image-digest
+      description: The digest of the container image.
+  steps:
+    - name: get-and-parse-imagedetails
+      image: registry.redhat.io/openshift4/ose-cli:latest
+      script: |
+        #!/usr/bin/env bash
+        set -eo pipefail
+        FULL_IMAGE=$(oc get snapshot -n "$(params.namespace)" "$(params.snapshot-name)" -o jsonpath="{.spec.components[?(@.name=='$(params.component-name)')].containerImage}")
+        if [ -z "${FULL_IMAGE}" ]; then
+          echo "Error: Component '$(params.component-name)' not found in Snapshot '$(params.snapshot-name)'" >&2
+          exit 1
+        fi
+        IMAGE_URL=$(echo "${FULL_IMAGE}" | cut -d'@' -f1)
+        IMAGE_DIGEST=$(echo "${FULL_IMAGE}" | cut -d'@' -f2)
+        echo -n "${IMAGE_URL}" | tr -d '\n' > "$(results.image-url.path)"
+        echo -n "${IMAGE_DIGEST}" | tr -d '\n' > "$(results.image-digest.path)"
