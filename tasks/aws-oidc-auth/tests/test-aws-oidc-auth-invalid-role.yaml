@@ -1,0 +1,20 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-aws-oidc-auth-invalid-role
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Run the aws-oidc-auth task with an invalid role ARN and verify that
+    the task fails with an appropriate error message.
+  tasks:
+    - name: run-task
+      taskRef:
+        name: aws-oidc-auth
+      params:
+        - name: roleArn
+          value: "arn:aws:iam::123456789012:role/invalid-role"
+        - name: region
+          value: "us-east-1"
