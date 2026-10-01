@@ -242,23 +242,23 @@ spec:
               set -eu
 
               cd /workdir
-              DATETIME_TAG="${COMPONENT_NAME}-$(date +%Y%m%d-%H%M%S)"
+              DATETIME_TAG="${COMPONENT_NAME}-$(date +%Y%m%d)"
               LATEST_TAG="${COMPONENT_NAME}-latest"
 
-              push_tag() {
+              attach_artifact() {
                 TAG="${1}"
                 echo "=== Pushing ${OCI_ARTIFACT_REPO}:${TAG} ==="
-                oras push \
+                oras attach \
                   --registry-config /workspace/oci-artifact-creds/.dockerconfigjson \
                   --artifact-type application/vnd.appstudio.pipelinerun+json \
                   "${OCI_ARTIFACT_REPO}:${TAG}" \
                   sanitized-pipelinerun.json:application/json
               }
 
-              push_tag "${LATEST_TAG}"
-              push_tag "${DATETIME_TAG}"
+              attach_artifact "${LATEST_TAG}"
+              attach_artifact "${DATETIME_TAG}"
 
-              echo "OCI artifact pushed as :${LATEST_TAG} and :${DATETIME_TAG}"
+              echo "OCI artifact attached to :${LATEST_TAG} and :${DATETIME_TAG}" tags
 
   finally:
     - name: remove-finalizer
