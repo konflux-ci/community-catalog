@@ -242,8 +242,8 @@ spec:
               set -eu
 
               cd /workdir
-              DATETIME_TAG="${COMPONENT_NAME}-$(date +%Y%m%d)"
-              LATEST_TAG="${COMPONENT_NAME}-latest"
+              DATETIME_TAG="$(date +%Y%m%d)"
+              LATEST_TAG="latest"
 
               attach_artifact() {
                 TAG="${1}"
