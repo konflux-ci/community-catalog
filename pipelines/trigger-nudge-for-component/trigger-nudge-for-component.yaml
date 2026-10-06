@@ -1,0 +1,50 @@
+apiVersion: tekton.dev/v1beta1
+kind: Pipeline
+metadata:
+  name: trigger-nudge-for-component
+spec:
+  description: >-
+    This pipeline orchestrates a direct component nudge. It gets the new
+    image details from the release snapshot and then runs the Renovate
+    task to create a PR.
+  params:
+    - name: snapshot-name
+    - name: component-to-nudge
+    - name: git-repo-to-update
+    - name: git-token-secret-name
+    - name: file-to-match
+    - name: image-line-match-string
+    - name: namespace
+  workspaces:
+    - name: trigger-nudge-for-component
+  tasks:
+    - name: get-image-details-from-snapshot
+      taskRef:
+        name: get-image-details-from-snapshot
+      params:
+        - name: snapshot-name
+          value: $(params.snapshot-name)
+        - name: component-name
+          value: $(params.component-to-nudge)
+        - name: namespace
+          value: $(params.namespace)
+    - name: run-renovate-for-component
+      runAfter: [get-image-details-from-snapshot]
+      taskRef:
+        name: run-renovate-for-component
+      workspaces:
+        - name: shared-workspace
+          workspace: trigger-nudge-for-component
+      params:
+        - name: git-repository-url
+          value: $(params.git-repo-to-update)
+        - name: git-token-secret-name
+          value: $(params.git-token-secret-name)
+        - name: image-name
+          value: $(tasks.get-image-details-from-snapshot.results.image-url)
+        - name: new-digest
+          value: $(tasks.get-image-details-from-snapshot.results.image-digest)
+        - name: file-match
+          value: $(params.file-to-match)
+        - name: match-strings
+          value: $(params.image-line-match-string)
