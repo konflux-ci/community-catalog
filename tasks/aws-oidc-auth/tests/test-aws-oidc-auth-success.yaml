@@ -1,0 +1,45 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-aws-oidc-auth-success
+spec:
+  description: |
+    Run the aws-oidc-auth task and verify that credentials are written
+    to the in-memory volume with correct format and permissions.
+  tasks:
+    - name: run-task
+      taskRef:
+        name: aws-oidc-auth
+      params:
+        - name: roleArn
+          value: "arn:aws:iam::123456789012:role/test-role"
+        - name: region
+          value: "us-east-1"
+        - name: script
+          value: |
+            # Verify credentials file exists and is readable
+            test -f "${AWS_SHARED_CREDENTIALS_FILE}"
+
+            # Verify credentials file contains expected keys
+            grep -q "aws_access_key_id" "${AWS_SHARED_CREDENTIALS_FILE}"
+            grep -q "aws_secret_access_key" "${AWS_SHARED_CREDENTIALS_FILE}"
+            grep -q "aws_session_token" "${AWS_SHARED_CREDENTIALS_FILE}"
+
+            # Verify credential values match mock response
+            grep -q "ASIAMOCKACCESSKEYID00" "${AWS_SHARED_CREDENTIALS_FILE}"
+            grep -q "MockSecretAccessKey1234567890abcdefghijk" "${AWS_SHARED_CREDENTIALS_FILE}"
+            grep -q "MockSessionToken1234567890abcdefghijklmnopqrstuvwxyz" "${AWS_SHARED_CREDENTIALS_FILE}"
+
+            # Verify file permissions are restrictive
+            PERMS=$(stat -c '%a' "${AWS_SHARED_CREDENTIALS_FILE}")
+            if [ "${PERMS}" != "600" ]; then
+              echo "ERROR: Credentials file permissions are ${PERMS}, expected 600" >&2
+              exit 1
+            fi
+
+            # Verify env vars are set
+            test -n "${AWS_SHARED_CREDENTIALS_FILE}"
+            test "${AWS_DEFAULT_REGION}" = "us-east-1"
+
+            echo "All checks passed."
