@@ -1,0 +1,43 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: request-pr-candidate-release
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+spec:
+  description: |-
+    Request a trusted PR candidate Release from a Snapshot and wait for its result.
+
+    See the [Task README](../../tasks/request-pr-candidate-release/README.md) for
+    Snapshot requirements, candidate mapping, namespace permissions, and prerequisites.
+
+    For branch testing, set taskGitUrl and taskGitRevision to the same repository
+    and revision used by the outer Pipeline Git resolver. Pin both resolvers to
+    the same immutable catalog commit for final validation.
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Name of the pull-request Snapshot in the TaskRun namespace
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+      default: development
+  tasks:
+    - name: request-pr-candidate-release
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/request-pr-candidate-release/request-pr-candidate-release.yaml
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
