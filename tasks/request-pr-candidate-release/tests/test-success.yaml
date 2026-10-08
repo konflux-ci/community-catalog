@@ -1,0 +1,27 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-success
+spec:
+  description: |
+    Request only the mapped candidate plan for each Gecko component and reuse a completed Release
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-pr-candidate-release
+      params:
+        - name: SNAPSHOT
+          value: success
+    - name: run-platform-api-task
+      taskRef:
+        name: request-pr-candidate-release
+      params:
+        - name: SNAPSHOT
+          value: success-platform-api
+    - name: run-idempotent-task
+      taskRef:
+        name: request-pr-candidate-release
+      params:
+        - name: SNAPSHOT
+          value: success-idempotency

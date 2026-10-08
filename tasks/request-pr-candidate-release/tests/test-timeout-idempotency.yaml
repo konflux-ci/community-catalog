@@ -1,0 +1,17 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-timeout-idempotency
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Reuse the matching Release without creating another and time out after 3600 virtual seconds
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-pr-candidate-release
+      params:
+        - name: SNAPSHOT
+          value: timeout-idempotency

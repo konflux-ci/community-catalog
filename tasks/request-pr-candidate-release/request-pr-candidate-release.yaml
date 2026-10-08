@@ -1,0 +1,179 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: request-pr-candidate-release
+spec:
+  description: |-
+    Request a trusted candidate Release for a Gecko pull-request Snapshot.
+
+    The Snapshot must contain exactly one component, a pull_request event label,
+    and a full lowercase 40-character Git SHA matching its source revision.
+    Its application label must match spec.application. Only these fixed pairs
+    are supported:
+
+    - gecko-controllers/gecko-controllers: gecko-controllers-pr-candidate
+    - gecko-platform-api-server/gecko-platform-api-server: gecko-platform-api-server-pr-candidate
+
+    Releases are scoped to the TaskRun namespace and identified by Snapshot UID
+    and candidate ReleasePlan labels. A matching Release is reused only after
+    verifying both labels and spec fields. New Releases are read back and verified.
+    ManagedPipelineProcessed=False with reason Progressing remains pending;
+    other False reasons fail immediately. True with a valid condition reason
+    succeeds, including Succeeded or Skipped. Absent, unknown, or malformed
+    nonterminal conditions remain pending within the same fixed deadline.
+    Pending Releases are polled every 15 seconds for at most 3600 seconds.
+    Each API request is limited to 30 seconds or the remaining deadline, whichever
+    is smaller. A fixed one-hour Tekton step timeout bounds the entire execution.
+
+    The runner needs namespace-scoped get access to Snapshots and create, get,
+    and list access to Releases. It does not read Secrets or registry credentials.
+    The two candidate ReleasePlans must already exist in the namespace.
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Name of the pull-request Snapshot in the TaskRun namespace
+  steps:
+    - name: request-pr-candidate-release
+      image: quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+      timeout: 1h
+      env:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: TASKRUN_NAMESPACE
+          value: $(context.taskRun.namespace)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        fail() {
+          printf '%s\n' "$*" >&2
+          exit 1
+        }
+
+        valid_name() {
+          [[ ${#1} -le 253 && "$1" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]]
+        }
+
+        check_deadline() {
+          NOW=$(date +%s) || fail "Unable to check candidate Release timeout"
+          REMAINING=$((3600 - (NOW - START_TIME)))
+          ((REMAINING > 0)) || fail "Timed out waiting for candidate Release after 3600 seconds"
+        }
+
+        kubectl_request() {
+          local request_timeout
+          check_deadline
+          request_timeout=$REMAINING
+          if ((request_timeout > 30)); then request_timeout=30; fi
+          kubectl --request-timeout="${request_timeout}s" -n "$TASKRUN_NAMESPACE" "$@"
+        }
+
+        valid_name "$SNAPSHOT" || fail "Invalid Snapshot name"
+        START_TIME=$(date +%s) || fail "Unable to start candidate Release timeout"
+        SNAPSHOT_JSON=$(kubectl_request get snapshot "$SNAPSHOT" -o json) ||
+          fail "Unable to read Snapshot"
+        jq -e --arg name "$SNAPSHOT" --arg namespace "$TASKRUN_NAMESPACE" '
+          .metadata.name == $name and .metadata.namespace == $namespace
+        ' <<< "$SNAPSHOT_JSON" > /dev/null || fail "Snapshot identity does not match the request"
+        jq -e '.metadata.labels["pac.test.appstudio.openshift.io/event-type"] == "pull_request"' \
+          <<< "$SNAPSHOT_JSON" > /dev/null || fail "Snapshot must be from a pull_request event"
+        jq -e '.spec.components | type == "array" and length == 1' \
+          <<< "$SNAPSHOT_JSON" > /dev/null || fail "Snapshot must contain exactly one component"
+        jq -e '
+          .spec.application as $application |
+          ($application == "gecko-controllers" or $application == "gecko-platform-api-server") and
+          .metadata.labels["appstudio.openshift.io/application"] == $application and
+          .spec.components[0].name == $application
+        ' <<< "$SNAPSHOT_JSON" > /dev/null || fail "Unsupported application/component metadata"
+        APPLICATION=$(jq -r '.spec.application' <<< "$SNAPSHOT_JSON") || fail "Invalid Snapshot application"
+        COMPONENT=$(jq -r '.spec.components[0].name' <<< "$SNAPSHOT_JSON") || fail "Invalid Snapshot component"
+        case "$APPLICATION/$COMPONENT" in
+          gecko-controllers/gecko-controllers) RELEASE_PLAN=gecko-controllers-pr-candidate ;;
+          gecko-platform-api-server/gecko-platform-api-server) RELEASE_PLAN=gecko-platform-api-server-pr-candidate ;;
+          *) fail "Unsupported application/component pair" ;;
+        esac
+        jq -e '
+          .spec.components[0].source.git.revision |
+          type == "string" and length == 40 and test("^[0-9a-f]{40}$")
+        ' <<< "$SNAPSHOT_JSON" > /dev/null ||
+          fail "Snapshot source revision must be a full lowercase 40-character hexadecimal SHA"
+        jq -e '
+          .metadata.labels["pac.test.appstudio.openshift.io/sha"] == .spec.components[0].source.git.revision
+        ' <<< "$SNAPSHOT_JSON" > /dev/null || fail "Snapshot SHA label does not match the source revision"
+        jq -e '
+          .metadata.uid | type == "string" and length == 36 and
+          test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+        ' <<< "$SNAPSHOT_JSON" > /dev/null || fail "Invalid Snapshot UID"
+        SNAPSHOT_UID=$(jq -r '.metadata.uid // ""' <<< "$SNAPSHOT_JSON") || fail "Invalid Snapshot UID"
+
+        verify_release() {
+          jq -e --arg snapshot "$SNAPSHOT" --arg namespace "$TASKRUN_NAMESPACE" \
+            --arg uid "$SNAPSHOT_UID" --arg plan "$RELEASE_PLAN" --arg name "$RELEASE_NAME" '
+            .metadata.name == $name and .metadata.namespace == $namespace and
+            .metadata.labels["gcp-hcp.openshift.io/pr-candidate-snapshot-uid"] == $uid and
+            .metadata.labels["gcp-hcp.openshift.io/pr-candidate-release-plan"] == $plan and
+            .spec.snapshot == $snapshot and .spec.releasePlan == $plan
+          ' <<< "$1" > /dev/null || fail "Candidate Release identity or spec does not match the request"
+        }
+
+        SELECTOR="gcp-hcp.openshift.io/pr-candidate-snapshot-uid=$SNAPSHOT_UID"
+        SELECTOR+=",gcp-hcp.openshift.io/pr-candidate-release-plan=$RELEASE_PLAN"
+        RELEASES=$(kubectl_request get releases -l "$SELECTOR" -o json) ||
+          fail "Unable to find existing candidate Releases"
+        jq -e '.items | type == "array"' <<< "$RELEASES" > /dev/null || fail "Invalid candidate Release list"
+        RELEASE_COUNT=$(jq '.items | length' <<< "$RELEASES") || fail "Invalid candidate Release count"
+        case "$RELEASE_COUNT" in
+          0)
+            REQUEST=$(jq -n --arg snapshot "$SNAPSHOT" --arg uid "$SNAPSHOT_UID" --arg plan "$RELEASE_PLAN" '
+              {
+                apiVersion: "appstudio.redhat.com/v1alpha1", kind: "Release",
+                metadata: {
+                  generateName: "pr-candidate-",
+                  labels: {
+                    "gcp-hcp.openshift.io/pr-candidate-snapshot-uid": $uid,
+                    "gcp-hcp.openshift.io/pr-candidate-release-plan": $plan
+                  }
+                },
+                spec: {snapshot: $snapshot, releasePlan: $plan}
+              }
+            ') || fail "Unable to construct candidate Release request"
+            CREATED=$(kubectl_request create -f - -o name <<< "$REQUEST") ||
+              fail "Unable to create candidate Release"
+            [[ "$CREATED" == release.appstudio.redhat.com/* || "$CREATED" == release/* ]] ||
+              fail "Unexpected candidate Release creation response"
+            RELEASE_NAME=${CREATED#*/}
+            ;;
+          1)
+            RELEASE_NAME=$(jq -r '.items[0].metadata.name // ""' <<< "$RELEASES") ||
+              fail "Invalid existing candidate Release name"
+            verify_release "$(jq -c '.items[0]' <<< "$RELEASES")"
+            ;;
+          *) fail "Multiple candidate Releases match the Snapshot UID and ReleasePlan" ;;
+        esac
+        valid_name "$RELEASE_NAME" || fail "Invalid candidate Release name"
+        RELEASE_JSON=$(kubectl_request get release "$RELEASE_NAME" -o json) ||
+          fail "Unable to read candidate Release"
+        verify_release "$RELEASE_JSON"
+
+        while true; do
+          check_deadline
+          CONDITION=$(jq -r '
+            [.status.conditions[]? | select(.type == "ManagedPipelineProcessed")][0] as $condition |
+            if $condition.status == "True" and
+              ($condition.reason | if type == "string" then
+                test("\\A[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?\\z") else false end)
+            then "True"
+            elif $condition.status == "False" and $condition.reason != "Progressing"
+            then "False"
+            else "" end
+          ' <<< "$RELEASE_JSON") || fail "Invalid candidate Release conditions"
+          case "$CONDITION" in
+            True) printf 'Candidate Release completed successfully\n'; exit 0 ;;
+            False) fail "Candidate Release failed: ManagedPipelineProcessed=False" ;;
+          esac
+          sleep 15 || fail "Unable to wait for candidate Release"
+          RELEASE_JSON=$(kubectl_request get release "$RELEASE_NAME" -o json) ||
+            fail "Unable to poll candidate Release"
+          verify_release "$RELEASE_JSON"
+        done
