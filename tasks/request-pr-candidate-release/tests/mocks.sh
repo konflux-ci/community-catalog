@@ -219,6 +219,7 @@ mock_release_list() {
 
 kubectl() {
   local namespace="" output="" selector="" filename="" verb="" resource="" name="" response=""
+  local request_timeout=""
   while (($#)); do
     case "$1" in
       -n | --namespace) namespace="$2"; shift 2 ;;
@@ -229,6 +230,7 @@ kubectl() {
       --selector=*) selector="${1#*=}"; shift ;;
       -f | --filename) filename="$2"; shift 2 ;;
       --filename=*) filename="${1#*=}"; shift ;;
+      --request-timeout=*) request_timeout="${1#*=}"; shift ;;
       -*) mock_error "Unexpected kubectl option: $1"; return 1 ;;
       *)
         if [[ -z "$verb" ]]; then verb="$1"
@@ -240,6 +242,12 @@ kubectl() {
         ;;
     esac
   done
+  if [[ -n "$request_timeout" ]]; then
+    if [[ ! "$request_timeout" =~ ^[1-9][0-9]*s$ ]] || ((${request_timeout%s} > 30)); then
+      mock_error "Expected a positive kubectl request timeout of at most 30 seconds"
+      return 1
+    fi
+  fi
   if [[ "$namespace" != default ]]; then
     mock_error "Task must use its own namespace (default in the test harness)"
     return 1

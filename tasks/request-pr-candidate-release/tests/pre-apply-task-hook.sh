@@ -5,6 +5,9 @@ TASK_PATH="$1"
 SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 export SCRIPT_DIR
 
+# Check the real embedded script before injecting the Pipeline-case fixtures.
+bash "$SCRIPT_DIR/regression-tests.sh" "$TASK_PATH"
+
 # Keep the original script's errexit behavior in a subshell. Check its observed
 # API effects afterwards, including for cases whose Task is expected to fail.
 # shellcheck disable=SC2016 # Tekton must receive the literal parameter reference.
