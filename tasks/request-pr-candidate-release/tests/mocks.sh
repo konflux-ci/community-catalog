@@ -81,6 +81,8 @@ mock_self_test() {
       release-failure)
         touch "$MOCK_STATE/created"
         kubectl -n default get release pr-candidate-test -o json > /dev/null
+        printf '15\n' > "$MOCK_STATE/elapsed"
+        kubectl -n default get release pr-candidate-test -o json > /dev/null
         diagnostic='Candidate Release failed: ManagedPipelineProcessed=False'
         ;;
       timeout-idempotency)
@@ -173,6 +175,8 @@ mock_release() {
     True) reason=Succeeded; message="Candidate copy completed" ;;
     False) reason=Failed; message="Candidate copy failed" ;;
   esac
+  reason=${2:-$reason}
+  if [[ "$reason" == Progressing ]]; then message="Candidate copy is running"; fi
   plan=$(mock_expected_plan) || { mock_error "ReleasePlan fixture generation failed"; return 1; }
   jq -n --arg snapshot "$PR_CANDIDATE_TEST_CASE" --arg plan "$plan" \
     --arg status "$status" --arg reason "$reason" --arg message "$message" '
@@ -201,17 +205,17 @@ mock_release() {
 }
 
 mock_release_list() {
-  local release condition
+  local release condition reason=Succeeded
   case "$PR_CANDIDATE_TEST_CASE" in
     success-idempotency) condition=True ;;
-    timeout-idempotency) condition=Unknown ;;
+    timeout-idempotency) condition=False; reason=Progressing ;;
     *)
       printf '%s\n' '{"apiVersion":"appstudio.redhat.com/v1alpha1","kind":"ReleaseList",
         "metadata":{"resourceVersion":"2"},"items":[]}' || mock_error "ReleaseList fixture generation failed"
       return
       ;;
   esac
-  release=$(mock_release "$condition") || { mock_error "ReleaseList item generation failed"; return 1; }
+  release=$(mock_release "$condition" "$reason") || { mock_error "ReleaseList item generation failed"; return 1; }
   jq -n --argjson release "$release" '{apiVersion: "appstudio.redhat.com/v1alpha1",
     kind: "ReleaseList", metadata: {resourceVersion: "2"}, items: [$release]}' ||
     mock_error "ReleaseList fixture generation failed"
@@ -278,18 +282,27 @@ kubectl() {
         if [[ ! -f "$MOCK_STATE/created" && ! -f "$MOCK_STATE/release-listed" ]]; then
           mock_error "Release read before create or lookup"; return 1
         fi
-        local condition
+        local condition=True reason=Succeeded elapsed=0
+        if [[ -f "$MOCK_STATE/elapsed" ]]; then elapsed=$(command cat "$MOCK_STATE/elapsed"); fi
         case "$PR_CANDIDATE_TEST_CASE" in
-          release-failure) condition=False ;;
-          timeout-idempotency) condition=Unknown ;;
-          *) condition=True ;;
+          release-failure)
+            condition=False; reason=Progressing
+            if ((elapsed >= 15)); then reason=Failed; fi
+            ;;
+          timeout-idempotency) condition=False; reason=Progressing ;;
+          success | success-platform-api)
+            if ((elapsed < 15)); then condition=False; reason=Progressing; fi
+            ;;
         esac
-        response=$(mock_release "$condition") || { mock_error "Release read fixture failed"; return 1; }
+        response=$(mock_release "$condition" "$reason") || { mock_error "Release read fixture failed"; return 1; }
         printf '%s\n' "$response" || { mock_error "Release fixture output failed"; return 1; }
         touch "$MOCK_STATE/release-read"
-        case "$PR_CANDIDATE_TEST_CASE" in
-          release-failure) touch "$MOCK_STATE/terminal-failure" ;;
-          timeout-idempotency) touch "$MOCK_STATE/pending" ;;
+        jq -c '.status.conditions[]? | select(.type == "ManagedPipelineProcessed") |
+          {status, reason}' <<< "$response" >> "$MOCK_STATE/condition-reads" ||
+          { mock_error "Release condition capture failed"; return 1; }
+        case "$condition/$reason" in
+          False/Progressing) touch "$MOCK_STATE/pending" ;;
+          False/Failed) touch "$MOCK_STATE/terminal-failure" ;;
         esac
       else
         mock_error "Unexpected Release lookup"; return 1
@@ -347,7 +360,8 @@ assert_task_outcome() {
   [[ -f "$MOCK_STATE/snapshot-read" && ! -f "$MOCK_STATE/error" ]] || valid=false
   case "$PR_CANDIDATE_TEST_CASE" in
     success | success-platform-api)
-      [[ -f "$MOCK_STATE/created" && -f "$MOCK_STATE/release-read" ]] || valid=false
+      [[ -f "$MOCK_STATE/created" && -f "$MOCK_STATE/release-read" &&
+        -f "$MOCK_STATE/pending" && "$(command cat "$MOCK_STATE/elapsed")" == 15 ]] || valid=false
       ;;
     success-idempotency)
       [[ -f "$MOCK_STATE/release-listed" && -f "$MOCK_STATE/release-read" &&
@@ -359,7 +373,8 @@ assert_task_outcome() {
       ;;
     release-failure)
       expected_failure=true
-      [[ -f "$MOCK_STATE/created" && -f "$MOCK_STATE/terminal-failure" ]] || valid=false
+      [[ -f "$MOCK_STATE/created" && -f "$MOCK_STATE/pending" &&
+        -f "$MOCK_STATE/terminal-failure" && "$(command cat "$MOCK_STATE/elapsed")" == 15 ]] || valid=false
       ;;
     timeout-idempotency)
       expected_failure=true

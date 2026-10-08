@@ -10,27 +10,56 @@ yq -r '.spec.steps[0].script' "$TASK_PATH" > "$ARTIFACTS/production-script.sh"
 failures=0
 
 for probe in newline-application newline-component newline-revision newline-sha \
-  newline-terminal-status poll-after-deadline api-elapsed-time; do
+  newline-terminal-status poll-after-deadline api-elapsed-time \
+  progressing-success progressing-failure progressing-timeout \
+  newline-terminal-reason newline-progressing-reason absent-condition unknown-status success-skipped; do
   set +e
   (
     export PR_CANDIDATE_TEST_CASE=success
-    if [[ "$probe" == newline-terminal-status || "$probe" == poll-after-deadline || "$probe" == api-elapsed-time ]]; then
-      PR_CANDIDATE_TEST_CASE=timeout-idempotency
-    fi
+    case "$probe" in
+      newline-terminal-status | poll-after-deadline | api-elapsed-time | progressing-timeout | \
+        newline-terminal-reason | newline-progressing-reason | absent-condition | unknown-status)
+        PR_CANDIDATE_TEST_CASE=timeout-idempotency ;;
+      progressing-failure) PR_CANDIDATE_TEST_CASE=release-failure ;;
+      success-skipped) PR_CANDIDATE_TEST_CASE=success-idempotency ;;
+    esac
     # Retain the complete inherited mock, with its kubectl function renamed so
     # this focused test can observe and model time spent at the API boundary.
     # shellcheck source=/dev/null
     source <(sed 's/^kubectl() {/fixture_kubectl() {/' "$SCRIPT_DIR/mocks.sh")
     printf '%s\n' "$MOCK_STATE" > "$ARTIFACTS/$probe-state"
     BASE_SNAPSHOT=$(mock_snapshot)
-    if [[ "$probe" == newline-terminal-status ]]; then
+    if [[ "$probe" == newline-terminal-status || "$probe" == newline-terminal-reason ]]; then
       BASE_RELEASE=$(mock_release True)
       # Called indirectly by the inherited Release API mock.
       # shellcheck disable=SC2329
       mock_release() {
-        jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed").status) = "True\n"' <<< "$BASE_RELEASE"
+        if [[ "$probe" == newline-terminal-status ]]; then
+          jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed").status) = "True\n"' <<< "$BASE_RELEASE"
+        else
+          jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed").reason) = "Succeeded\n"' <<< "$BASE_RELEASE"
+        fi
       }
     fi
+    case "$probe" in
+      newline-progressing-reason | absent-condition | unknown-status | success-skipped)
+        BASE_RELEASE=$(mock_release False Progressing)
+        # Called indirectly by the inherited Release API mock.
+        # shellcheck disable=SC2329
+        mock_release() {
+          case "$probe" in
+            newline-progressing-reason)
+              jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed").reason) = "Progressing\n"' <<< "$BASE_RELEASE" ;;
+            absent-condition) jq '.status.conditions = []' <<< "$BASE_RELEASE" ;;
+            unknown-status)
+              jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed").status) = "Unknown"' <<< "$BASE_RELEASE" ;;
+            success-skipped)
+              jq '(.status.conditions[] | select(.type == "ManagedPipelineProcessed")) |=
+                (.status = "True" | .reason = "Skipped")' <<< "$BASE_RELEASE" ;;
+          esac
+        }
+        ;;
+    esac
     export SNAPSHOT=$PR_CANDIDATE_TEST_CASE TASKRUN_NAMESPACE=default
     # Called indirectly by the inherited Snapshot API mock.
     # shellcheck disable=SC2329
@@ -79,7 +108,9 @@ for probe in newline-application newline-component newline-revision newline-sha 
   set -e
   state=$(command cat "$ARTIFACTS/$probe-state")
   valid=true
-  [[ "$actual_exit" == 1 && ! -f "$state/error" ]] || valid=false
+  expected_exit=1
+  if [[ "$probe" == progressing-success || "$probe" == success-skipped ]]; then expected_exit=0; fi
+  [[ "$actual_exit" == "$expected_exit" && ! -f "$state/error" ]] || valid=false
   case "$probe" in
     newline-application | newline-component | newline-revision | newline-sha)
       [[ ! -f "$state/created.json" ]] || valid=false
@@ -90,7 +121,8 @@ for probe in newline-application newline-component newline-revision newline-sha 
         *) grep -Eiq '(revision|sha).*(40|full|invalid|malformed)' "$ARTIFACTS/$probe.log" || valid=false ;;
       esac
       ;;
-    newline-terminal-status | poll-after-deadline | api-elapsed-time)
+    newline-terminal-status | poll-after-deadline | api-elapsed-time | progressing-timeout | \
+      newline-terminal-reason | absent-condition | unknown-status)
       [[ ! -f "$state/created.json" && -f "$state/pending" && ! -f "$state/oversized-timeout" ]] || valid=false
       while read -r elapsed request_timeout; do
         ((elapsed < 3600 && request_timeout > 0 && request_timeout <= 30 &&
@@ -102,12 +134,40 @@ for probe in newline-application newline-component newline-revision newline-sha 
         [[ -f "$state/stalled-request-timed-out" ]] || valid=false
         grep -q '^3584 16$' "$state/api-requests" || valid=false
       fi
+      if [[ "$probe" == progressing-timeout ]]; then
+        jq -se 'length > 1 and all(.status == "False" and .reason == "Progressing")' \
+          "$state/condition-reads" > /dev/null || valid=false
+      fi
+      ;;
+    progressing-success | progressing-failure)
+      [[ -f "$state/created.json" && -f "$state/pending" &&
+        "$(command cat "$state/elapsed")" == 15 ]] || valid=false
+      terminal_status=True terminal_reason=Succeeded
+      if [[ "$probe" == progressing-failure ]]; then
+        terminal_status=False terminal_reason=Failed
+        [[ -f "$state/terminal-failure" ]] || valid=false
+        grep -q 'Candidate Release failed: ManagedPipelineProcessed=False' "$ARTIFACTS/$probe.log" || valid=false
+      else
+        grep -q 'Candidate Release completed successfully' "$ARTIFACTS/$probe.log" || valid=false
+      fi
+      jq -se --arg status "$terminal_status" --arg reason "$terminal_reason" '
+        length == 2 and .[0] == {status: "False", reason: "Progressing"} and
+        .[1] == {status: $status, reason: $reason}
+      ' "$state/condition-reads" > /dev/null || valid=false
+      ;;
+    newline-progressing-reason)
+      [[ ! -f "$state/created.json" && "$(command cat "$state/elapsed")" == 0 ]] || valid=false
+      grep -q 'Candidate Release failed: ManagedPipelineProcessed=False' "$ARTIFACTS/$probe.log" || valid=false
+      ;;
+    success-skipped)
+      [[ ! -f "$state/created.json" && "$(command cat "$state/elapsed")" == 0 ]] || valid=false
+      grep -q 'Candidate Release completed successfully' "$ARTIFACTS/$probe.log" || valid=false
       ;;
   esac
   if $valid; then
-    printf 'PASS: %s rejects safely with verified production effects\n' "$probe"
+    printf 'PASS: %s has the expected outcome with verified production effects\n' "$probe"
   else
-    printf 'FAIL: %s did not satisfy rejection/deadline assertions (Task exit %s)\n' "$probe" "$actual_exit"
+    printf 'FAIL: %s did not satisfy outcome/deadline assertions (Task exit %s)\n' "$probe" "$actual_exit"
     failures=$((failures + 1))
   fi
 done

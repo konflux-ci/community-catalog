@@ -13,7 +13,10 @@ are supported:
 Releases are scoped to the TaskRun namespace and identified by Snapshot UID
 and candidate ReleasePlan labels. A matching Release is reused only after
 verifying both labels and spec fields. New Releases are read back and verified.
-Success requires ManagedPipelineProcessed=True; False fails immediately.
+ManagedPipelineProcessed=False with reason Progressing remains pending;
+other False reasons fail immediately. True with a valid condition reason
+succeeds, including Succeeded or Skipped. Absent, unknown, or malformed
+nonterminal conditions remain pending within the same fixed deadline.
 Pending Releases are polled every 15 seconds for at most 3600 seconds.
 Each API request is limited to 30 seconds or the remaining deadline, whichever
 is smaller. A fixed one-hour Tekton step timeout bounds the entire execution.
