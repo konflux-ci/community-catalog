@@ -12,5 +12,7 @@ yq -i '
   .spec.steps[0].env += [{"name": "PR_CANDIDATE_TEST_CASE", "value": "$(params.SNAPSHOT)"}] |
   .spec.steps[0].script = load_str(strenv(SCRIPT_DIR) + "/mocks.sh") +
     "\nset +e\n(\n" + .spec.steps[0].script +
-    "\n)\nTASK_EXIT=$?\nassert_task_outcome \"$TASK_EXIT\"\n"
+    "\n) > \"$MOCK_STATE/task-stdout\" 2> \"$MOCK_STATE/task-stderr\"\nTASK_EXIT=$?\n" +
+    "command cat \"$MOCK_STATE/task-stdout\"\ncommand cat \"$MOCK_STATE/task-stderr\" >&2\n" +
+    "assert_task_outcome \"$TASK_EXIT\"\n"
 ' "$TASK_PATH"
