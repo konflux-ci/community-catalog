@@ -1,0 +1,19 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-request-release-from-pr-snapshot-snapshot-spec-param
+  annotations:
+    test/assert-task-failure: "run-task"
+spec:
+  description: |
+    Check that the task fails when SNAPSHOT is a serialized Snapshot spec instead of a name
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-release-from-pr-snapshot
+      params:
+        - name: SNAPSHOT
+          value: '{"application":"demo","components":[]}'
+        - name: RELEASE_PLAN
+          value: dev-plan

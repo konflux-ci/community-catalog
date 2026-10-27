@@ -1,0 +1,17 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-request-release-from-pr-snapshot-retry-failed-release
+spec:
+  description: |
+    Check that a new Release is created when the previous Release for the Snapshot failed
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-release-from-pr-snapshot
+      params:
+        - name: SNAPSHOT
+          value: pr-snapshot-retry
+        - name: RELEASE_PLAN
+          value: dev-plan

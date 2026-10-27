@@ -1,0 +1,17 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-request-release-from-pr-snapshot-success
+spec:
+  description: |
+    Check that a Release is created for a pull request Snapshot and the task succeeds once it is released
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-release-from-pr-snapshot
+      params:
+        - name: SNAPSHOT
+          value: pr-snapshot
+        - name: RELEASE_PLAN
+          value: dev-plan

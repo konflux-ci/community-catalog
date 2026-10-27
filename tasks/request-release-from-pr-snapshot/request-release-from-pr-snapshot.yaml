@@ -1,0 +1,168 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: request-release-from-pr-snapshot
+spec:
+  description: |-
+    Create a Release for a pull request Snapshot and wait for it to complete.
+
+    Intended to run as an IntegrationTestScenario so that pull request builds
+    can be published (for example to a development registry) by an existing
+    tenant ReleasePlan. The task itself holds no registry credentials; the
+    ReleasePlan's pipeline and service account do the publishing.
+
+    The IntegrationTestScenario must be annotated with
+    test.appstudio.openshift.io/snapshot-param-as-name: "true" so that the
+    integration service passes the Snapshot name, not its serialized spec, as SNAPSHOT.
+
+    Guards:
+    - The Snapshot must come from a pull request: it has the
+      pac.test.appstudio.openshift.io/pull-request annotation and is not from a push
+      event (the same check integration-service uses, so builds triggered by PR
+      comments such as /retest also qualify)
+    - The git revision of the component that triggered the Snapshot must match the
+      pac.test.appstudio.openshift.io/sha label set by Pipelines as Code, so a PR
+      cannot publish images under another commit's SHA tag
+    - The ReleasePlan must belong to the same application as the Snapshot
+    - The ReleasePlan must be labeled release.appstudio.openshift.io/auto-release: "false"
+      so that it cannot be a ReleasePlan used for regular releases
+
+    The newest Release already created for the same Snapshot UID and ReleasePlan
+    is reused unless it failed, so re-running the test does not create duplicate
+    Releases but does retry a failed one.
+    The task succeeds or fails based on the Release's Released condition.
+
+    The TaskRun service account needs get access to Snapshots and ReleasePlans
+    and create, get, and list access to Releases in the namespace
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Name of the pull request Snapshot in the TaskRun namespace
+    - name: RELEASE_PLAN
+      type: string
+      description: Name of the ReleasePlan in the TaskRun namespace to release the Snapshot with
+    - name: TIMEOUT_SECONDS
+      type: string
+      description: How long to wait for the Release to complete
+      default: "3600"
+  results:
+    - name: RELEASE_NAME
+      description: Name of the Release created or reused for the Snapshot
+  steps:
+    - name: request-release
+      image: quay.io/konflux-ci/release-service-utils:e633d51cd41d73e4b3310face21bb980af7a662f
+      env:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: RELEASE_PLAN
+          value: $(params.RELEASE_PLAN)
+        - name: TIMEOUT_SECONDS
+          value: $(params.TIMEOUT_SECONDS)
+        - name: NAMESPACE
+          value: $(context.taskRun.namespace)
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        SNAPSHOT_UID_LABEL="community-catalog.konflux-ci.dev/pr-snapshot-uid"
+        RELEASE_PLAN_LABEL="community-catalog.konflux-ci.dev/pr-release-plan"
+
+        fail() {
+          echo "ERROR: $*" >&2
+          exit 1
+        }
+
+        [[ "$TIMEOUT_SECONDS" =~ ^[0-9]+$ ]] || fail "TIMEOUT_SECONDS must be a whole number"
+        # The ReleasePlan name is stored as a label value, which is limited to 63 characters
+        [ "${#RELEASE_PLAN}" -le 63 ] || fail "RELEASE_PLAN name must be 63 characters or fewer"
+        # Without the snapshot-param-as-name annotation on the IntegrationTestScenario,
+        # SNAPSHOT is the Snapshot's serialized spec instead of its name
+        [[ ${#SNAPSHOT} -le 253 && "$SNAPSHOT" =~ ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$ ]] ||
+          fail "SNAPSHOT is not a Snapshot name. Annotate the IntegrationTestScenario with" \
+            "test.appstudio.openshift.io/snapshot-param-as-name: \"true\""
+        DEADLINE=$(( $(date +%s) + TIMEOUT_SECONDS ))
+
+        SNAPSHOT_JSON=$(kubectl get snapshot "$SNAPSHOT" -n "$NAMESPACE" -o json)
+        EVENT_TYPE=$(jq -r '.metadata.labels["pac.test.appstudio.openshift.io/event-type"] // ""' \
+          <<< "$SNAPSHOT_JSON")
+        PULL_REQUEST=$(jq -r '.metadata.annotations["pac.test.appstudio.openshift.io/pull-request"] // ""' \
+          <<< "$SNAPSHOT_JSON")
+        if [ -z "$PULL_REQUEST" ] || [ "$EVENT_TYPE" == "push" ] || [ "$EVENT_TYPE" == "Push" ]; then
+          fail "Snapshot $SNAPSHOT is not from a pull request" \
+            "(event-type: '$EVENT_TYPE', pull-request: '$PULL_REQUEST')"
+        fi
+        PAC_SHA=$(jq -r '.metadata.labels["pac.test.appstudio.openshift.io/sha"] // ""' <<< "$SNAPSHOT_JSON")
+        COMPONENT=$(jq -r '.metadata.labels["appstudio.openshift.io/component"] // ""' <<< "$SNAPSHOT_JSON")
+        REVISION=$(jq -r --arg component "$COMPONENT" \
+          '.spec.components[] | select(.name == $component) | .source.git.revision // ""' <<< "$SNAPSHOT_JSON")
+        if [ -z "$PAC_SHA" ] || [ "$REVISION" != "$PAC_SHA" ]; then
+          fail "Revision '$REVISION' of component '$COMPONENT' does not match the pull request" \
+            "commit '$PAC_SHA' from Pipelines as Code"
+        fi
+        APPLICATION=$(jq -r '.spec.application' <<< "$SNAPSHOT_JSON")
+        SNAPSHOT_UID=$(jq -r '.metadata.uid' <<< "$SNAPSHOT_JSON")
+
+        RELEASE_PLAN_JSON=$(kubectl get releaseplan "$RELEASE_PLAN" -n "$NAMESPACE" -o json)
+        PLAN_APPLICATION=$(jq -r '.spec.application' <<< "$RELEASE_PLAN_JSON")
+        [ "$PLAN_APPLICATION" == "$APPLICATION" ] ||
+          fail "ReleasePlan $RELEASE_PLAN is for application '$PLAN_APPLICATION', not '$APPLICATION'"
+        AUTO_RELEASE=$(jq -r '.metadata.labels["release.appstudio.openshift.io/auto-release"] // ""' \
+          <<< "$RELEASE_PLAN_JSON")
+        [ "$AUTO_RELEASE" == "false" ] ||
+          fail "ReleasePlan $RELEASE_PLAN must have label release.appstudio.openshift.io/auto-release: \"false\""
+
+        released_condition() {
+          jq -c '[.status.conditions[]? | select(.type == "Released")][0] // {}'
+        }
+
+        SELECTOR="${SNAPSHOT_UID_LABEL}=${SNAPSHOT_UID},${RELEASE_PLAN_LABEL}=${RELEASE_PLAN}"
+        LATEST=$(kubectl get releases -n "$NAMESPACE" -l "$SELECTOR" -o json |
+          jq -c '.items | sort_by(.metadata.creationTimestamp) | last // empty')
+        LATEST_FAILED=false
+        if [ -n "$LATEST" ]; then
+          LATEST_CONDITION=$(released_condition <<< "$LATEST")
+          if [ "$(jq -r '.status // ""' <<< "$LATEST_CONDITION")" == "False" ] &&
+            [ "$(jq -r '.reason // ""' <<< "$LATEST_CONDITION")" != "Progressing" ]; then
+            LATEST_FAILED=true
+          fi
+        fi
+
+        if [ -n "$LATEST" ] && [ "$LATEST_FAILED" == "false" ]; then
+          RELEASE_NAME=$(jq -r '.metadata.name' <<< "$LATEST")
+          echo "Reusing Release $RELEASE_NAME for Snapshot $SNAPSHOT with ReleasePlan $RELEASE_PLAN"
+        else
+          if [ "$LATEST_FAILED" == "true" ]; then
+            echo "Previous Release $(jq -r '.metadata.name' <<< "$LATEST") failed, creating a new one"
+          fi
+          RELEASE_NAME=$(jq -n \
+            --arg snapshot "$SNAPSHOT" --arg plan "$RELEASE_PLAN" --arg uid "$SNAPSHOT_UID" \
+            --arg uidLabel "$SNAPSHOT_UID_LABEL" --arg planLabel "$RELEASE_PLAN_LABEL" '{
+              apiVersion: "appstudio.redhat.com/v1alpha1",
+              kind: "Release",
+              metadata: {
+                generateName: "pr-snapshot-",
+                labels: {($uidLabel): $uid, ($planLabel): $plan}
+              },
+              spec: {snapshot: $snapshot, releasePlan: $plan}
+            }' | kubectl create -n "$NAMESPACE" -f - -o jsonpath='{.metadata.name}')
+          echo "Created Release $RELEASE_NAME for Snapshot $SNAPSHOT with ReleasePlan $RELEASE_PLAN"
+        fi
+        echo -n "$RELEASE_NAME" > "$(results.RELEASE_NAME.path)"
+
+        while true; do
+          CONDITION=$(kubectl get release "$RELEASE_NAME" -n "$NAMESPACE" -o json | released_condition)
+          STATUS=$(jq -r '.status // ""' <<< "$CONDITION")
+          REASON=$(jq -r '.reason // ""' <<< "$CONDITION")
+          if [ "$STATUS" == "True" ]; then
+            echo "Release $RELEASE_NAME succeeded"
+            exit 0
+          elif [ "$STATUS" == "False" ] && [ "$REASON" != "Progressing" ]; then
+            fail "Release $RELEASE_NAME failed ($REASON): $(jq -r '.message // ""' <<< "$CONDITION")"
+          fi
+
+          [ "$(date +%s)" -lt "$DEADLINE" ] ||
+            fail "Timed out after ${TIMEOUT_SECONDS}s waiting for Release $RELEASE_NAME"
+          echo "Release $RELEASE_NAME in progress (${REASON:-pending}), waiting..."
+          sleep 15
+        done

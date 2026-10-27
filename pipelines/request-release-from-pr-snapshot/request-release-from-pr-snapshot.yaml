@@ -1,0 +1,53 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: request-release-from-pr-snapshot
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.12.1"
+spec:
+  description: |-
+    Create a Release for a pull request Snapshot and wait for it to complete.
+
+    Intended to be used as an IntegrationTestScenario pipeline so that pull
+    request builds are published by a dedicated, non auto-release ReleasePlan.
+    The IntegrationTestScenario must be annotated with
+    test.appstudio.openshift.io/snapshot-param-as-name: "true" so SNAPSHOT is the
+    Snapshot name. See the task README for the guards applied and the RBAC required
+  params:
+    - name: SNAPSHOT
+      type: string
+      description: Name of the pull request Snapshot, passed in by the integration service
+    - name: RELEASE_PLAN
+      type: string
+      description: Name of the ReleasePlan to release the Snapshot with
+    - name: TIMEOUT_SECONDS
+      type: string
+      description: How long to wait for the Release to complete
+      default: "3600"
+    - name: taskGitUrl
+      type: string
+      description: The url to the git repo where the community-catalog tasks to be used are stored
+      default: https://github.com/konflux-ci/community-catalog.git
+    - name: taskGitRevision
+      type: string
+      description: The revision in the taskGitUrl repo to be used
+      default: development
+  tasks:
+    - name: request-release-from-pr-snapshot
+      taskRef:
+        resolver: "git"
+        params:
+          - name: url
+            value: $(params.taskGitUrl)
+          - name: revision
+            value: $(params.taskGitRevision)
+          - name: pathInRepo
+            value: tasks/request-release-from-pr-snapshot/request-release-from-pr-snapshot.yaml
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: RELEASE_PLAN
+          value: $(params.RELEASE_PLAN)
+        - name: TIMEOUT_SECONDS
+          value: $(params.TIMEOUT_SECONDS)

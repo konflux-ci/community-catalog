@@ -1,0 +1,17 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: test-request-release-from-pr-snapshot-existing-release
+spec:
+  description: |
+    Check that the newest in-progress Release for the Snapshot is reused instead of creating a new one
+  tasks:
+    - name: run-task
+      taskRef:
+        name: request-release-from-pr-snapshot
+      params:
+        - name: SNAPSHOT
+          value: pr-snapshot-existing
+        - name: RELEASE_PLAN
+          value: dev-plan
