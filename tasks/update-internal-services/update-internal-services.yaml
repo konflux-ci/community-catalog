@@ -76,20 +76,49 @@ spec:
           BRANCH="internal-services-$(params.deployment)-manager-update"
           git checkout -b "$BRANCH"
 
-          OVERLAY_PATH="components/internal-services/internal-$(params.deployment)"
-          cp "${IS_REPO}/config/crd/bases/"*.yaml "${OVERLAY_PATH}/crds"
-          cp "${IS_REPO}/config/rbac/"*.yaml "${OVERLAY_PATH}/rbac"
-          # Remove namespace line in rbac files
-          find "${OVERLAY_PATH}/rbac" -type f \
-            -exec sed -i '/namespace: system/d' {} \;
-          # Add konflux-release-team group to role_binding.yaml
+          MANAGER_PATH="components/internal-services/internal-$(params.deployment)/manager"
+          SHARED_PATH="components/internal-services/shared-resources"
+
+          # Copy CRDs into the shared-resources layer
+          cp "${IS_REPO}/config/crd/bases/"*.yaml "${SHARED_PATH}/crds"
+
+          # Copy RBAC into the shared-resources layer, renaming files to the
+          # convention names used by the canonical directory layout
+          declare -A RBAC_RENAMES=(
+            [role.yaml]=internal-services-manager-role-cr.yaml
+            [role_binding.yaml]=internal-services-manager-rolebinding-crb.yaml
+            [auth_proxy_client_clusterrole.yaml]=metrics-reader-cr.yaml
+            [auth_proxy_role.yaml]=proxy-role-cr.yaml
+            [auth_proxy_role_binding.yaml]=proxy-rolebinding-crb.yaml
+            [auth_proxy_service.yaml]=controller-manager-metrics-service-svc.yaml
+            [leader_election_role.yaml]=leader-election-role-cr.yaml
+            [leader_election_role_binding.yaml]=leader-election-rolebinding-rb.yaml
+            [internalrequest_editor_role.yaml]=internalrequest-editor-role-cr.yaml
+            [internalrequest_viewer_role.yaml]=internalrequest-viewer-role-cr.yaml
+            [internalservicesconfig_editor_role.yaml]=internalservicesconfig-editor-role-cr.yaml
+            [internalservicesconfig_viewer_role.yaml]=internalservicesconfig-viewer-role-cr.yaml
+            [service_account.yaml]=controller-manager-sa.yaml
+          )
+          for src in "${IS_REPO}/config/rbac/"*.yaml; do
+            src_name=$(basename "$src")
+            # Skip the repo's own kustomization; the shared-resources one also
+            # includes local-only resources under convention names
+            if [[ "$src_name" == "kustomization.yaml" ]]; then
+              continue
+            fi
+            target="${RBAC_RENAMES[$src_name]:-$src_name}"
+            cp "$src" "${SHARED_PATH}/rbac/${target}"
+            # Remove namespace line in rbac files
+            sed -i '/namespace: system/d' "${SHARED_PATH}/rbac/${target}"
+          done
+          # Add konflux-release-team group to the manager role binding
           yq -i ".subjects += {\"kind\": \"Group\", \"name\": \"konflux-release-team\" }" \
-            "${OVERLAY_PATH}/rbac/role_binding.yaml"
+            "${SHARED_PATH}/rbac/internal-services-manager-rolebinding-crb.yaml"
 
           PREV_COMMIT=$(grep -r "quay.io/konflux-ci/internal-services:" \
-            "components/internal-services/internal-$(params.deployment)/manager" | head -n 1 | cut -d ':' -f 4)
+            "${MANAGER_PATH}" | head -n 1 | cut -d ':' -f 4)
           # Perform manager substitution
-          find "components/internal-services/internal-$(params.deployment)/manager" -type f -name "manager-*.yaml" \
+          find "${MANAGER_PATH}" -type f -name "manager-*.yaml" \
             -exec sed -i "s|quay.io/konflux-ci/internal-services:.*|$(params.image)|" {} \;
 
           git add .
